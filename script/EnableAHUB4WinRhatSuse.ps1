@@ -1,3 +1,5 @@
+## Enable Windows SUSE RHAT hybrid benefit for all VMs in a subscription
+
 #Connect to Azure subscription
 Connect-AzAccount
 
