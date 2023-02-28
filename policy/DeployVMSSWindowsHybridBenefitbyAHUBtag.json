@@ -109,7 +109,7 @@
     },
     "description": "This policy ensures VMSS Windows virtual machines are configured (DeployIfNotExists) for Azure Hybrid Benefit for Windows Client and Server by Filtering AHUB tag for true - https://docs.microsoft.com/en-us/azure/virtual-machines/windows/hybrid-use-benefit-licensing#ways-to-use-azure-hybrid-benefit-for-windows-server.",
     "mode": "Indexed",
-    "displayName": "Deploy Azure Hybrid Benefit for Windows.",
+    "displayName": "Deploy Azure Hybrid Benefit for VMSS Windows.",
     "metadata": {
         "category": "Compute"
     }
