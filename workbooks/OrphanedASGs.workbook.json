@@ -1,0 +1,26 @@
+{
+    "version": "Notebook/1.0",
+    "items": [
+      {
+        "type": 3,
+        "content": {
+          "version": "KqlItem/1.0",
+          "query": "Resources\r\n| where type == \"microsoft.network/applicationsecuritygroups\" and isnull(properties.networkInterfaces) and isnull(properties.subnets)\r\n| project subscriptionId, Resource=id, resourceGroup, location, tags",
+          "size": 0,
+          "showExportToExcel": true,
+          "queryType": 1,
+          "resourceType": "microsoft.resourcegraph/resources",
+          "crossComponentResources": [
+            "value::all"
+          ],
+          "visualization": "table"
+        },
+        "name": "query - 0"
+      }
+    ],
+    "fallbackResourceIds": [
+      "Azure Monitor"
+    ],
+    "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+  }
+  
