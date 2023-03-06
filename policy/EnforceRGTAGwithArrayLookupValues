@@ -1,0 +1,66 @@
+{
+    "description": "This policy ensures that resource groups are tagged with array lookup values so the possible values are prompted to the contributors if any errors.",
+    "mode": "Indexed",
+    "displayName": "Enfore Resource Group Tag with Array lookup values.",
+    "metadata": {
+        "category": "Tags"
+    }
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.Resources/subscriptions/resourceGroups"
+        },
+        {
+          "anyOf": [
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "exists": false
+            },
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "notin": "[array(parameters('tagLookup'))]"
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Enable or disable the execution of the audit policy"
+      },
+      "allowedValues": [
+        "Audit",
+        "Deny",
+        "Disabled"
+      ],
+      "defaultValue": "Deny"
+    },
+    "tagName": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Tag Name",
+        "description": "Name of the tag, such as 'environment'"
+      }
+    },
+    "tagLookup": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Tag Allowed Values",
+        "description": "Allowed Values of the resource group tag, such as ['value1','value2']"
+      },
+      "defaultValue": [
+        "value1",
+        "value2"
+      ]
+    }
+  }
+}
