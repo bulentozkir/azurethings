@@ -8,7 +8,7 @@ foreach ($machine in $machines) {
   if ($extension) {
     # Delete the extension
     Remove-AzConnectedMachineExtension -MachineName $machine.Name -Name MicrosoftMonitoringAgent -ResourceGroupName $machine.ResourceGroupName -Force
-    Write-Host "Deleted AzureMonitorWindowsAgent extension from $($machine.Name)"
+    Write-Host "Deleted MicrosoftMonitoringAgent extension from $($machine.Name)"
   }
   else {
     Write-Host "MicrosoftMonitoringAgent extension not found on $($machine.Name)"
