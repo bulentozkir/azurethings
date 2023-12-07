@@ -14,3 +14,11 @@ foreach ($machine in $machines) {
     Write-Host "MicrosoftMonitoringAgent extension not found on $($machine.Name)"
   }
 }
+
+
+# Light version of the same script
+$myVM = Get-AzConnectedMachine
+foreach($vm in $myVM)
+{
+	Remove-AzConnectedMachineExtension -MachineName $vm.Name -Name MicrosoftMonitoringAgent -ResourceGroupName $vm.ResourceGroupName -Verbose
+}
