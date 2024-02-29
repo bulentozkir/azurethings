@@ -1,0 +1,58 @@
+{
+    "mode": "All",
+    "description": "This policy ensures that the specified IP addresses are allowed to access the SQL Server",
+    "policyRule": {
+        "if": {
+            "allOf": [
+                {
+                    "field": "type",
+                    "equals": "Microsoft.Sql/servers/firewallRules"
+                },
+                {
+                    "not": {
+                        "field": "Microsoft.Sql/servers/firewallRules/startIpAddress",
+                        "in": "[parameters('allowedStartIps')]"
+                    }
+                },
+                {
+                    "not": {
+                        "field": "Microsoft.Sql/servers/firewallRules/endIpAddress",
+                        "in": "[parameters('allowedEndIps')]"
+                    }
+                }
+            ]
+        },
+        "then": {
+            "effect": "[parameters('effect')]"
+        }
+    },
+    "parameters": {
+        "allowedStartIps": {
+            "type": "Array",
+            "defaultValue": [
+                "10.0.0.0",
+                "10.0.1.0"
+            ]
+        },
+        "allowedEndIps": {
+            "type": "Array",
+            "defaultValue": [
+                "10.0.0.1",
+                "10.0.1.1"
+            ]
+        },
+        "effect": {
+            "type": "string",
+            "metadata": {
+                "displayName": "Policy Effect",
+                "description": "Sets the effect of the Policy. Useful for when the Policy is part of an initiative."
+            },
+            "allowedValues": [
+                "Audit",
+                "Deny",
+                "Disabled"
+            ],
+            "defaultValue": "Audit"
+        }
+    }
+}
