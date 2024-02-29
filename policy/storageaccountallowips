@@ -1,0 +1,57 @@
+{
+  "mode": "All",
+  "description": "This policy ensures that the specified IP addresses are allowed to access the storage account.",
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.Storage/storageAccounts"
+        },
+        {
+          "anyOf": [
+            {
+              "not": {
+                "field": "Microsoft.Storage/storageAccounts/networkAcls.ipRules[*].value",
+                "in": "[parameters('allowedIPRanges')]"
+              }
+            },
+            {
+              "field": "Microsoft.Storage/storageAccounts/networkAcls.bypass",
+              "notEquals": "None"
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  },
+  "parameters": {
+    "allowedIPRanges": {
+      "type": "array",
+      "metadata": {
+        "description": "The list of allowed public IP ranges.",
+        "displayName": "Allowed IP Ranges"
+      },
+      "defaultValue": [
+        "10.0.0.0/24",
+        "192.168.1.0/24"
+      ]
+    },
+    "effect": {
+      "type": "string",
+      "metadata": {
+        "displayName": "Policy Effect",
+        "description": "Sets the effect of the Policy. Useful for when the Policy is part of an initiative."
+      },
+      "allowedValues": [
+        "Audit",
+        "Deny",
+        "Disabled"
+      ],
+      "defaultValue": "Audit"
+    }
+  }
+}
