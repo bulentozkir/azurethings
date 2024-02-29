@@ -1,0 +1,54 @@
+{
+  "mode": "All",
+  "description": "Ensure that the web app has IP restrictions configured",
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.Web/sites/config"
+        },
+        {
+          "anyOf": [
+            {
+              "not": {
+                "field": "Microsoft.Web/sites/config/web.ipSecurityRestrictions[*].ipAddress",
+                "in": "[parameters('allowedIPRanges')]"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  },
+  "parameters": {
+    "allowedIPRanges": {
+      "type": "array",
+      "metadata": {
+        "description": "The list of allowed public IP ranges.",
+        "displayName": "Allowed IP Ranges"
+      },
+      "defaultValue": [
+        "10.0.0.0/24",
+        "20.0.0.0/24"
+        "Any"
+      ]
+    },
+    "effect": {
+      "type": "string",
+      "metadata": {
+        "displayName": "Policy Effect",
+        "description": "Sets the effect of the Policy. Useful for when the Policy is part of an initiative."
+      },
+      "allowedValues": [
+        "Audit",
+        "Deny",
+        "Disabled"
+      ],
+      "defaultValue": "Audit"
+    }
+  }
+}
