@@ -3,11 +3,11 @@
 ##### CHANGE THESE VARIABLES PER YOUR ENVIRONMENT
 
 # Define your Azure App Service Plan details
-$resourceGroupName = "app1bulento_group"
-$appServicePlanName = "ASP-app1bulentogroup-98d9"
+$resourceGroupName = "?"
+$appServicePlanName = "?"
 
 # Define your Subscription Id
-$subId = "a0fdc749-441a-43a5-8297-29192ed42f79"
+$subId = "?"
 
 # Define date ranges (Month and Day of Month) when Worker Count should be set to 6
 $dateRanges = @(
