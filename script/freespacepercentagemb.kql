@@ -1,0 +1,25 @@
+// KQL query to list freespace percentage and mb for all Azure VMs having VM Insights enabled
+
+InsightsMetrics
+| where Namespace == "LogicalDisk"
+| where Name == "FreeSpacePercentage"
+| extend Tags = todynamic(Tags)
+| extend Drive = tostring(Tags['vm.azm.ms/mountId'])
+| join kind=inner (
+    InsightsMetrics
+    | where Namespace == "LogicalDisk"
+    | where Name == "FreeSpaceMB"
+    | extend Tags = todynamic(Tags)
+    | extend Drive = tostring(Tags['vm.azm.ms/mountId'])
+) on Computer, Drive, TimeGenerated
+| extend FreeSpaceMB = round(Val1, 0)
+| summarize arg_max(TimeGenerated, *) by Computer, Drive
+| project 
+    Computer,
+    Drive,
+    TimeGenerated,
+    FreeSpacePercentage = round(Val, 1),
+    UsedSpacePercentage = round(100 - Val, 1),
+    FreeSpaceMB,
+    TotalSpaceMB = round(FreeSpaceMB * 100 / Val, 1)
+| order by Computer asc, Drive asc
