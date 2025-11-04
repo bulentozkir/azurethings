@@ -1,0 +1,93 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "dcrName": {
+      "defaultValue": "MSVMOtel-centralindia-win-srv-01",
+      "type": "String"
+    },
+    "monitoringAccountId": {
+      "defaultValue": "/subscriptions/44d3e5d8-23bc-4517-a680-f2d6359dd516/resourceGroups/rg-sentinel-cin/providers/microsoft.monitor/accounts/monw-sentinel-cin-01",
+      "type": "String"
+    },
+    "location": {
+      "defaultValue": "centralindia",
+      "type": "String"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dcrName')]",
+      "location": "[parameters('location')]",
+      "kind": "Windows",
+      "properties": {
+        "dataSources": {
+          "extensions": [
+            {
+              "name": "VMInsightsExtension",
+              "streams": [
+                "Microsoft-OtelPerfMetrics"
+              ],
+              "extensionName": "VMInsights",
+              "settings": {
+                "enableOtelMetrics": true,
+                "otelMetricsConfiguration": {
+                  "samplingIntervalInSeconds": 60,
+                  "metricNames": [
+                    "cpu.usage",
+                    "memory.usage",
+                    "memory.available",
+                    "disk.usage",
+                    "disk.read.bytes",
+                    "disk.write.bytes",
+                    "network.bytes.sent",
+                    "network.bytes.received",
+                    "network.packets.sent",
+                    "network.packets.received",
+                    "logical.disk.read.ops",
+                    "logical.disk.write.ops",
+                    "logical.disk.read.bytes",
+                    "logical.disk.write.bytes",
+                    "logical.disk.queue.length",
+                    "logical.disk.time",
+                    "logical.disk.idle.time",
+                    "logical.disk.split.io",
+                    "logical.disk.free.space",
+                    "logical.disk.percent.free.space",
+                    "logical.disk.percent.usage",
+                    "logical.disk.percent.idle.time",
+                    "logical.disk.percent.split.io",
+                    "logical.disk.percent.queue.length",
+                    "logical.disk.percent.time",
+                    "logical.disk.percent.read.time",
+                    "logical.disk.percent.write.time"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "destinations": {
+          "monitoringAccounts": [
+            {
+              "accountResourceId": "[parameters('monitoringAccountId')]",
+              "name": "MonitoringAccountDestination"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "Microsoft-OtelPerfMetrics"
+            ],
+            "destinations": [
+              "MonitoringAccountDestination"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
