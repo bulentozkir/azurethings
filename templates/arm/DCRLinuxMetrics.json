@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "dcrName": {
-      "defaultValue": "MSVMOtel-centralindia-linux-srv-cin-01",
+      "defaultValue": "MSVMOtel-centralindia-linux-srv-01",
       "type": "String"
     },
     "monitoringAccountId": {
