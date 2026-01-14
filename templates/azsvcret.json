@@ -8,7 +8,7 @@
             "description": "alert rule name"
         },
         "actiongroups_externalid": {
-            "defaultValue": "'/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup1', '/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup2'",
+            "defaultValue": "/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup1,/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup2",
             "type": "String",
             "description": "action groups resource id to receive email notifications."
         }
