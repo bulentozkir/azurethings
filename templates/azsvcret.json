@@ -1,0 +1,68 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "scheduledqueryrules_alert_azureserviceretirements_01_name": {
+            "defaultValue": "alert-azureserviceretirements-01",
+            "type": "String"
+        },
+        "actiongroups_actiongroup1_externalid": {
+            "defaultValue": "/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup1",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "microsoft.insights/scheduledqueryrules",
+            "apiVersion": "2025-01-01-preview",
+            "name": "[parameters('scheduledqueryrules_alert_azureserviceretirements_01_name')]",
+            "location": "centralindia",
+            "tags": {
+                "Environment": "Dev"
+            },
+            "kind": "LogAlert",
+            "identity": {
+                "type": "SystemAssigned"
+            },
+            "properties": {
+                "displayName": "[parameters('scheduledqueryrules_alert_azureserviceretirements_01_name')]",
+                "description": "Azure Service Retirements due date soon which needs your review and planning for remediation",
+                "severity": 2,
+                "enabled": true,
+                "evaluationFrequency": "P1D",
+                "scopes": [
+                    "/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79"
+                ],
+                "windowSize": "P2D",
+                "criteria": {
+                    "allOf": [
+                        {
+                            "query": "arg(\"\").advisorresources\n| where type == \"microsoft.advisor/recommendations\"\n| extend props = todynamic(properties)\n| where tostring(props.extendedProperties.recommendationSubCategory) == \"ServiceUpgradeAndRetirement\"\n| extend\n    RetirementFeature = tostring(props.extendedProperties.retirementFeatureName),\n    RetirementDate = todatetime(strcat(tostring(props.extendedProperties.retirementDate))),\n    Impact = tostring(props.impact),\n    ResourceId = tostring(props.resourceMetadata.resourceId),\n    ResourceType = tostring(props.impactedField),\n    Problem = tostring(props.shortDescription.problem),\n    Solution = tostring(props.shortDescription.solution),\n    LastUpdated = todatetime(props.lastUpdated)\n| extend\n    ResourceName = iff(\n                   isempty(ResourceId),\n                   \"Platform-wide\",\n                   tostring(split(ResourceId, \"/\")[-1])\n               )\n| where RetirementFeature != \"\"\n| where RetirementDate between (now()-730d .. now()+180d)\n| project\nsubscriptionId,\nResourceName,\nResourceType,\nRetirementFeature,\nRetirementDate,\nImpact,\nProblem,\nSolution,\nResourceId,\nLastUpdated\n| order by RetirementDate asc\n",
+                            "timeAggregation": "Count",
+                            "dimensions": [],
+                            "resourceIdColumn": "ResourceId",
+                            "operator": "GreaterThan",
+                            "threshold": 0,
+                            "failingPeriods": {
+                                "numberOfEvaluationPeriods": 1,
+                                "minFailingPeriodsToAlert": 1
+                            }
+                        }
+                    ]
+                },
+                "autoMitigate": false,
+                "muteActionsDuration": "P2D",
+                "actions": {
+                    "actionGroups": [
+                        "[parameters('actiongroups_actiongroup1_externalid')]"
+                    ],
+                    "customProperties": {},
+                    "actionProperties": {
+                        "Email.Subject": "Azure Service Retirements due date soon for your review and planning"
+                    }
+                }
+            }
+        }
+    ]
+}
