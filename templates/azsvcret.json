@@ -2,11 +2,11 @@
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
     "contentVersion": "1.0.0.0",
     "parameters": {
-        "scheduledqueryrules_alert_azureserviceretirements_01_name": {
+        "scheduledqueryrules_alert_name": {
             "defaultValue": "alert-azureserviceretirements-01",
             "type": "String"
         },
-        "actiongroups_actiongroup1_externalid": {
+        "actiongroups_externalid": {
             "defaultValue": "/subscriptions/a0fdc749-441a-43a5-8297-29192ed42f79/resourceGroups/rg-automation/providers/microsoft.insights/actiongroups/actiongroup1",
             "type": "String"
         }
@@ -16,7 +16,7 @@
         {
             "type": "microsoft.insights/scheduledqueryrules",
             "apiVersion": "2025-01-01-preview",
-            "name": "[parameters('scheduledqueryrules_alert_azureserviceretirements_01_name')]",
+            "name": "[parameters('scheduledqueryrules_alert_name')]",
             "location": "centralindia",
             "tags": {
                 "Environment": "Dev"
@@ -55,7 +55,7 @@
                 "muteActionsDuration": "P2D",
                 "actions": {
                     "actionGroups": [
-                        "[parameters('actiongroups_actiongroup1_externalid')]"
+                        "[parameters('actiongroups_externalid')]"
                     ],
                     "customProperties": {},
                     "actionProperties": {
