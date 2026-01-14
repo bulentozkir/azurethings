@@ -55,11 +55,12 @@ alert-azureserviceretirements-01
 **Description**  
 An **array of Azure Resource IDs** referencing **existing Azure Monitor Action Groups**. All Action Groups listed in the array will be triggered when the alert fires.
 
-**Example value**  
-[
+**Example single value**  
+"/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup1"
+
+**Example multiple values**  
 "/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup1",
 "/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup2"
-]
 
 **Notes**  
 - Action Groups must already exist  
