@@ -53,14 +53,11 @@ alert-azureserviceretirements-01
 ### actiongroups_externalid
 
 **Description**  
-An **array of Azure Resource IDs** referencing **existing Azure Monitor Action Groups**. All Action Groups listed in the array will be triggered when the alert fires.
+Action Group Azure Resource ID referencing an **existing Azure Monitor Action Group**. The Action Group will be triggered when the alert fires, meaning they will receive the alert as an email, thus it will be more convenient to use a distribution list as the recepient.
 
 **Example single value**  
-'/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup1'
+/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup1
 
-**Example multiple values**  
-'/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup1',
-'/subscriptions/<subscription-id>/resourceGroups/<rg-name>/providers/microsoft.insights/actiongroups/actiongroup2'
 
 **Notes**  
 - Action Groups must already exist  
