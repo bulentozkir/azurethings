@@ -19,7 +19,7 @@
             "name": "[parameters('scheduledqueryrules_alert_name')]",
             "location": "centralindia",
             "tags": {
-                "Environment": "Dev"
+                "Environment": "Prod"
             },
             "kind": "LogAlert",
             "identity": {
