@@ -5,12 +5,10 @@
         "scheduledqueryrules_alert_name": {
             "defaultValue": "alert-azureserviceretirements-01",
             "type": "String",
-            "description": "alert rule name"
         },
         "actiongroups_externalid": {
             "defaultValue": "",
             "type": "String",
-            "description": "action group resource id to receive email notifications."
         }
     },
     "variables": {},
@@ -34,7 +32,7 @@
                 "enabled": true,
                 "evaluationFrequency": "P1D",
                 "scopes": [
-                    "/"
+                    "[subscription().id]"
                 ],
                 "windowSize": "P2D",
                 "criteria": {
