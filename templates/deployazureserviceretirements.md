@@ -4,10 +4,12 @@ This repository contains an **Azure Resource Manager (ARM) template** that deplo
 
 ---
 
-**Notes**  
-** - The default template scope is per subscription, therefore this template should be deployed for each subscription one by one that you want to be notified about those resource retirements in that subscription.
-- Action Groups must already exist  
-- The deploying user must have Monitoring Contributor role in that subscription scope. **
+**Notes**
+
+- ***The default template scope is per subscription; therefore, this template must be deployed separately for each subscription you want to receive notifications for resource retirements.***
+- ***Action Groups must already exist.***
+- ***The deploying user must have the **Monitoring Contributor** role at the subscription scope.***
+
 
 
 ## 🚀 Deploy to Azure
