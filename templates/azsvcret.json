@@ -32,7 +32,7 @@
                 "enabled": true,
                 "evaluationFrequency": "P1D",
                 "scopes": [
-                    "[listSubscriptions().[*].subscriptionId]"
+                    "[subscription().id]"
                 ],
                 "windowSize": "P2D",
                 "criteria": {
