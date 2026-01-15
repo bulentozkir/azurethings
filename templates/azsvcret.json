@@ -4,11 +4,11 @@
     "parameters": {
         "scheduledqueryrules_alert_name": {
             "defaultValue": "alert-azureserviceretirements-01",
-            "type": "String",
+            "type": "String"
         },
         "actiongroups_externalid": {
             "defaultValue": "",
-            "type": "String",
+            "type": "String"
         }
     },
     "variables": {},
