@@ -1,18 +1,27 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.1",
+  "contentVersion": "1.0.0.6",
   "parameters": {
     "kqlquery_alert_name_prefix": {
       "type": "String",
-      "defaultValue": "arule-sretirement-"
+      "defaultValue": "arule-sretirement-",
+      "metadata": {
+        "description": "Prefix used for the Scheduled Query Rule name. The subscription display name and subscription ID will be appended automatically."
+      }
     },
     "actiongroups_externalid": {
       "type": "String",
-      "defaultValue": ""
+      "defaultValue": "",
+      "metadata": {
+        "description": "Full Resource ID of the Action Group to be invoked when the alert fires."
+      }
     },
     "alert_location": {
       "type": "String",
-      "defaultValue": "[deployment().location]"
+      "defaultValue": "westeurope",
+      "metadata": {
+        "description": "Azure region where the Scheduled Query Rule resource will be deployed."
+      }
     }
   },
   "variables": {},
@@ -20,15 +29,14 @@
     {
       "type": "microsoft.insights/scheduledqueryrules",
       "apiVersion": "2025-01-01-preview",
-      "name": "[substring(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '##'), 0, 260)]",
+      "name": "[substring(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId), 0, min(length(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId)), 260))]",
       "location": "[parameters('alert_location')]",
-      "tags": {},
       "kind": "LogAlert",
       "identity": {
         "type": "SystemAssigned"
       },
       "properties": {
-        "displayName": "[concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '##')]",
+        "displayName": "[concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId)]",
         "description": "Azure Service Retirements due date soon which needs your review and planning for remediation",
         "severity": 2,
         "enabled": true,
