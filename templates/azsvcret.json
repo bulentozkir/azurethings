@@ -36,7 +36,7 @@
         "type": "SystemAssigned"
       },
       "properties": {
-        "displayName": "[concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId)]",
+        "displayName": "[concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '-', subscription().subscriptionId)]",
         "description": "Azure Service Retirements due date soon which needs your review and planning for remediation",
         "severity": 2,
         "enabled": true,
