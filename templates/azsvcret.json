@@ -29,7 +29,7 @@
     {
       "type": "microsoft.insights/scheduledqueryrules",
       "apiVersion": "2025-01-01-preview",
-      "name": "[substring(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId), 0, min(length(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId)), 260))]",
+      "name": "[substring(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '--', subscription().subscriptionId), 0, min(length(concat(parameters('kqlquery_alert_name_prefix'), subscription().displayName, '-', subscription().subscriptionId)), 260))]",
       "location": "[parameters('alert_location')]",
       "kind": "LogAlert",
       "identity": {
