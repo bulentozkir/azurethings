@@ -1,6 +1,6 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
+    "contentVersion": "1.0.0.1",
     "parameters": {
         "scheduledqueryrules_alert_name": {
             "defaultValue": "alert-azureserviceretirements-01",
@@ -8,6 +8,10 @@
         },
         "actiongroups_externalid": {
             "defaultValue": "",
+            "type": "String"
+        },
+        "alert_location": {
+            "defaultValue": "resourceGroup().location",
             "type": "String"
         }
     },
@@ -17,10 +21,8 @@
             "type": "microsoft.insights/scheduledqueryrules",
             "apiVersion": "2025-01-01-preview",
             "name": "[parameters('scheduledqueryrules_alert_name')]",
-            "location": "centralindia",
-            "tags": {
-                "Environment": "Prod"
-            },
+            "location": "[parameters('alert_location')]",
+            "tags": {},
             "kind": "LogAlert",
             "identity": {
                 "type": "SystemAssigned"
