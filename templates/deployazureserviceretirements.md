@@ -51,10 +51,7 @@ The alert evaluates data at the **subscription scope** and is not limited by reg
 ### scheduledqueryrules_alert_name
 
 **Description**  
-The name of the Azure Monitor **Scheduled Query Rule**.
-
-**Default value**  
-alert-azureserviceretirements-01
+The prefix of the Azure Monitor **Scheduled Query Rule** name. The subscription name and subscription id will be added to that alert rule name as suffix automatically.
 
 ---
 
