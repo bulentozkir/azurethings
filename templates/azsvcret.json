@@ -44,7 +44,7 @@
         "scopes": [
           "[subscription().id]"
         ],
-        "windowSize": "P2D",
+        "windowSize": "P1D",
         "criteria": {
           "allOf": [
             {
