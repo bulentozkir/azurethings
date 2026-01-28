@@ -62,7 +62,6 @@
           ]
         },
         "autoMitigate": false,
-        "muteActionsDuration": "P2D",
         "actions": {
           "actionGroups": [
             "[parameters('actiongroups_externalid')]"
