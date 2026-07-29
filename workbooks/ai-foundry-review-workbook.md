@@ -2,7 +2,7 @@
 
 Deploy the workbook to an existing Azure resource group:
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbulentozkir%2Fazurethings%2Fmain%2Fworkbooks%2Fdeploy-workbook.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbulentozkir%2Fazurethings%2Fmain%2Fworkbooks%2Fdeploy-ai-foundry-review-workbook.json)
 
 The deployment creates one shared `Microsoft.Insights/workbooks` resource in the
 selected resource group. Redeploying to the same resource group updates the same
