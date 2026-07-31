@@ -346,6 +346,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -434,13 +435,14 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
+              "exportParameterName": "ModelAccounts",
+              "exportDefaultValue": "",
+              "exportFieldName": "ResourceId",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
-              },
-              "exportDefaultValue": "",
-              "exportParameterName": "ModelAccounts",
-              "exportFieldName": "ResourceId"
+              }
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
           },
@@ -459,6 +461,7 @@
               "size": 2,
               "title": "Model deployments",
               "queryType": 12,
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
@@ -497,6 +500,7 @@
               "size": 2,
               "title": "Model catalog and retirement dates",
               "queryType": 12,
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -583,6 +587,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
@@ -602,6 +607,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
@@ -682,6 +688,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
@@ -778,6 +785,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -865,6 +873,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
@@ -884,6 +893,7 @@
               "crossComponentResources": [
                 "{Subscriptions}"
               ],
+              "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
