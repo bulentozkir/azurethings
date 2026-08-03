@@ -1,4 +1,4 @@
-# Azure AI Issues and Model Retirement Workbook
+# Legacy VM Capacity Readiness
 
 Deploy the workbook to an existing Azure resource group:
 
