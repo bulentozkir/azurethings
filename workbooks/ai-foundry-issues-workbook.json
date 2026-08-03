@@ -4,7 +4,7 @@
     {
       "type": 1,
       "content": {
-        "json": "# Azure AI estate - issues and model retirement\r\n\r\nFleet-wide view of **Azure OpenAI**, **Microsoft Foundry**, **Foundry projects** and\r\n**AI Hub / AI Project** workspaces: security posture, network exposure, model\r\ndeployments and live model retirement dates."
+        "json": "# Azure AI estate - issues and model retirement\r\n\r\nFleet-wide view of **Azure OpenAI**, **Microsoft Foundry**, **Foundry projects** and\r\n**AI Hub / AI Project** workspaces: security posture, network exposure, model\r\ndeployments, model retirement dates and AI service retirement advisories."
       },
       "name": "title"
     },
@@ -218,12 +218,20 @@
             "id": "t7",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
+            "linkLabel": "Service retirements",
+            "subTarget": "serviceRetirements",
+            "style": "link"
+          },
+          {
+            "id": "t8",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
             "linkLabel": "Advisor and health",
             "subTarget": "advisor",
             "style": "link"
           },
           {
-            "id": "t8",
+            "id": "t9",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "About the data",
@@ -418,7 +426,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Model deployments\r\n\r\n**Azure Resource Graph cannot see model deployments.** The type\r\n`microsoft.cognitiveservices/accounts/deployments` returns zero rows - this was\r\nmeasured against live deployments, not assumed.\r\n\r\nThis tab uses the **Azure Resource Manager** control plane, which returns deployments\r\nfor **one account at a time**. Click a row in the account list below to switch\r\naccounts, or use the **Model account** parameter at the top.\r\n\r\n> **Seeing an empty grid?** That usually means the selected account genuinely hosts\r\n> no models. **Microsoft Foundry (AI Services)** accounts are frequently used for\r\n> Document Intelligence, Speech or Vision rather than model hosting, so they\r\n> legitimately have zero deployments. Azure OpenAI accounts are therefore listed and\r\n> selected first. Try another account, or run `Get-AIModelRetirement.ps1` for a\r\n> fleet-wide sweep.\r\n\r\n> **Why not all accounts at once?** Workbook ARM queries only accept a single Azure\r\n> *resource* path - a tenant-level `POST /batch` is rejected with\r\n> *\"Path must be for an Azure Resource\"*, and a multi-value parameter is joined\r\n> into one malformed path rather than fanned out. Both were tested against the\r\n> live portal. `Get-AIModelRetirement.ps1` batches the same calls across every\r\n> subscription and computes days-to-retirement per deployment.",
+              "json": "## Model deployments\r\n\r\n**Azure Resource Graph cannot see model deployments.** The type\r\n`microsoft.cognitiveservices/accounts/deployments` returns zero rows - this was\r\nmeasured against live deployments, not assumed.\r\n\r\nThis tab uses the **Azure Resource Manager** control plane, which returns deployments\r\nfor **one account at a time**. Click a row in the account list below to switch\r\naccounts, or use the **Model account** parameter at the top.\r\n\r\n> **Seeing an empty grid?** That usually means the selected account genuinely hosts\r\n> no models. **Microsoft Foundry (AI Services)** accounts are frequently used for\r\n> Document Intelligence, Speech or Vision rather than model hosting, so they\r\n> legitimately have zero deployments. Azure OpenAI accounts are therefore listed and\r\n> selected first. Try another account.\r\n\r\n> **Why not all accounts at once?** Workbook ARM queries only accept a single Azure\r\n> *resource* path - a tenant-level `POST /batch` is rejected with\r\n> *\"Path must be for an Azure Resource\"*, and a multi-value parameter is joined\r\n> into one malformed path rather than fanned out. Both were tested against the\r\n> live portal. The workbook therefore shows deployments for one selected account\r\n> at a time.",
               "style": "info"
             },
             "name": "mdHead"
@@ -436,8 +444,8 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
-              "exportParameterName": "ModelAccounts",
               "exportDefaultValue": "",
+              "exportParameterName": "ModelAccounts",
               "exportFieldName": "ResourceId",
               "gridSettings": {
                 "rowLimit": 1000,
@@ -449,7 +457,7 @@
           {
             "type": 1,
             "content": {
-              "json": "### Deployments for the selected account\r\n\r\n* **Version upgrade policy** - `NoAutoUpgrade` means the deployment will **not**\r\n  move off a retiring model version on its own. Those are your migration risks.\r\n  `OnceCurrentVersionExpired` auto-upgrades only at expiry;\r\n  `OnceNewDefaultVersionAvailable` tracks the current default.\r\n* **Content filter** - a deployment with no RAI policy is unfiltered.\r\n* **SKU** - `Standard` / `GlobalStandard` are pay-as-you-go; `ProvisionedManaged` is reserved capacity.\r\n\r\nThis grid is the authoritative response from the selected account's\r\n`/deployments` endpoint: **one row per actual deployment**. It deliberately does not\r\nmerge the model catalog into this table. Azure Workbooks supports only one join key,\r\nand composite JSONPath keys can evaluate empty in some portal runtimes, producing a\r\ncross join where every deployment is repeated for every catalog model.\r\n\r\nUse **Model retirement** for the live regional lifecycle calendar. For a fleet-wide\r\ndeployment-to-retirement join with days remaining, run\r\n**`Get-AIModelRetirement.ps1`**.\r\n\r\n**Two things to expect:**\r\n\r\n* An empty grid means the selected account has no model deployments. This is normal\r\n  for AI Services accounts used for Document Intelligence, Speech, or Vision.\r\n* **Tick exactly one account.** Azure Workbooks send an ARM query to **one Azure\r\n  resource path at a time** - `GET` and `GETARRAY` were both tested and each joins\r\n  multiple selected values into a single malformed path, and there is no\r\n  subscription-wide deployments API. Selecting several accounts will error."
+              "json": "### Deployments for the selected account\r\n\r\n* **Version upgrade policy** - `NoAutoUpgrade` means the deployment will **not**\r\n  move off a retiring model version on its own. Those are your migration risks.\r\n  `OnceCurrentVersionExpired` auto-upgrades only at expiry;\r\n  `OnceNewDefaultVersionAvailable` tracks the current default.\r\n* **Content filter** - a deployment with no RAI policy is unfiltered.\r\n* **SKU** - `Standard` / `GlobalStandard` are pay-as-you-go; `ProvisionedManaged` is reserved capacity.\r\n\r\nThis grid is the authoritative response from the selected account's\r\n`/deployments` endpoint: **one row per actual deployment**. It deliberately does not\r\nmerge the model catalog into this table. Azure Workbooks supports only one join key,\r\nand composite JSONPath keys can evaluate empty in some portal runtimes, producing a\r\ncross join where every deployment is repeated for every catalog model.\r\n\r\nUse **Model retirement** for the live regional lifecycle calendar. Match the\r\ndeployment's model and version to the corresponding catalog row.\r\n\r\n**Two things to expect:**\r\n\r\n* An empty grid means the selected account has no model deployments. This is normal\r\n  for AI Services accounts used for Document Intelligence, Speech, or Vision.\r\n* **Tick exactly one account.** Azure Workbooks send an ARM query to **one Azure\r\n  resource path at a time** - `GET` and `GETARRAY` were both tested and each joins\r\n  multiple selected values into a single malformed path, and there is no\r\n  subscription-wide deployments API. Selecting several accounts will error."
             },
             "name": "mdWhat"
           },
@@ -487,7 +495,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## Model retirement calendar\r\n\r\nLive retirement dates straight from the Azure model catalog, via the Resource\r\nManager control plane. Nothing here is hard-coded, so the dates stay correct as\r\nMicrosoft updates them.\r\n\r\nThe catalog shown is for the **region, subscription and account kind of the account\r\ncurrently selected on the Model deployments tab** - pick a different account there to\r\nsee a different catalog.\r\n\r\n> **Why the kind filter matters.** Azure returns the catalog once **per account kind**,\r\n> so the same model is listed several times - `gpt-4.1` appears once as `OpenAI` and\r\n> again as `AIServices` with identical dates. Unfiltered, a single region returned\r\n> **167 duplicated rows**. This grid is filtered to the selected account's kind, which\r\n> removes the duplicates and shows exactly the models **that account** can run.\r\n\r\n**How to use this tab**\r\n\r\n1. Note each model + version you actually run on the **Model deployments** tab.\r\n2. Find that model + version below to get its **Inference retirement** date.\r\n3. Prioritise any deployment whose **Version upgrade policy** is `NoAutoUpgrade` -\r\n   those will not migrate themselves.\r\n\r\n**Lifecycle meanings**\r\n\r\n| Status | Meaning |\r\n| --- | --- |\r\n| `GenerallyAvailable` | Supported for production |\r\n| `Preview` | Not for production; can be retired at short notice |\r\n| `Deprecating` | Retirement scheduled - **new deployments are already blocked** |\r\n| `Deprecated` | Retired - existing deployments stop serving traffic |\r\n\r\nAzure blocks new deployments of deprecating/deprecated versions, but **existing\r\ndeployments keep running until the retirement date and then fail**. That gap is\r\nexactly what this tab is for.\r\n\r\nFor a computed, fleet-wide report with days-remaining and severity across every\r\nsubscription, run `Get-AIModelRetirement.ps1`.",
+              "json": "## Model retirement calendar\r\n\r\nLive retirement dates straight from the Azure model catalog, via the Resource\r\nManager control plane. Nothing here is hard-coded, so the dates stay correct as\r\nMicrosoft updates them.\r\n\r\nThe catalog shown is for the **region, subscription and account kind of the account\r\ncurrently selected on the Model deployments tab** - pick a different account there to\r\nsee a different catalog.\r\n\r\n> **Why the kind filter matters.** Azure returns the catalog once **per account kind**,\r\n> so the same model is listed several times - `gpt-4.1` appears once as `OpenAI` and\r\n> again as `AIServices` with identical dates. Unfiltered, a single region returned\r\n> **167 duplicated rows**. This grid is filtered to the selected account's kind, which\r\n> removes the duplicates and shows exactly the models **that account** can run.\r\n\r\n**How to use this tab**\r\n\r\n1. Note each model + version you actually run on the **Model deployments** tab.\r\n2. Find that model + version below to get its **Inference retirement** date.\r\n3. Prioritise any deployment whose **Version upgrade policy** is `NoAutoUpgrade` -\r\n   those will not migrate themselves.\r\n\r\n**Lifecycle meanings**\r\n\r\n| Status | Meaning |\r\n| --- | --- |\r\n| `GenerallyAvailable` | Supported for production |\r\n| `Preview` | Not for production; can be retired at short notice |\r\n| `Deprecating` | Retirement scheduled - **new deployments are already blocked** |\r\n| `Deprecated` | Retired - existing deployments stop serving traffic |\r\n\r\nAzure blocks new deployments of deprecating/deprecated versions, but **existing\r\ndeployments keep running until the retirement date and then fail**. That gap is\r\nexactly what this tab is for.",
               "style": "warning"
             },
             "name": "rtHead"
@@ -857,6 +865,281 @@
           {
             "type": 1,
             "content": {
+              "json": "## Azure service retirements\r\n\r\nThis tab shows two independent retirement sources in separate grids. The rows are not\r\njoined or merged:\r\n\r\n* **Service Health retirements** are advisories retained for the selected\r\n  subscriptions. They include both upcoming deadlines and past-due retirements that\r\n  might still require customer action, with tracking ID, status, summary, and date.\r\n* **Advisor retirements** are the Microsoft-published metadata catalog for AI, Data,\r\n  Network, and Infrastructure services since 2024, including both elapsed and future\r\n  dates. The **# Resources** column counts matching Advisor recommendations in the\r\n  selected subscription/resource-group scope. Select a row to inspect those resources\r\n  in the grid below.\r\n\r\nService Health and Advisor remain separate sources. The Advisor count and resource\r\ndetails are derived only from `advisorresources` recommendation records.",
+              "style": "warning"
+            },
+            "name": "srHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "servicehealthresources\n| where type =~ 'microsoft.resourcehealth/events'\n| extend\n    eventType = tostring(properties.EventType),\n    eventSubType = tostring(properties.EventSubType)\n| where eventType == 'HealthAdvisory' and eventSubType == 'Retirement'\n| extend\n    status = tostring(properties.Status),\n    retirementTitle = tostring(properties.Title),\n    trackingId = tostring(properties.TrackingId),\n    retirementSummary = tostring(properties.Summary),\n    retirementDate = todatetime(tolong(properties.ImpactMitigationTime))\n| where isnotnull(retirementDate)\n| extend retirementText = tolower(strcat(retirementTitle, ' ', retirementSummary))\n| where retirementText contains 'azure ai'\n    or retirementText contains 'microsoft foundry'\n    or retirementText contains 'azure openai'\n    or retirementText contains 'machine learning'\n    or retirementText contains 'cognitive services'\n    or retirementText contains 'ai services'\n    or retirementText contains 'prompt flow'\n    or retirementText contains 'model inference'\n    or retirementText contains 'agent service'\n    or retirementText contains 'qnamaker'\n    or retirementText contains 'qna maker'\n    or retirementText contains 'language understanding'\n    or retirementText contains 'computer vision'\n    or retirementText contains 'custom vision'\n    or retirementText contains 'form recognizer'\n    or retirementText contains 'document intelligence'\n    or retirementText contains 'speech service'\n    or retirementText contains 'content moderator'\n    or retirementText contains 'anomaly detector'\n    or retirementText contains 'personalizer'\n    or retirementText contains 'metrics advisor'\n    or retirementText contains 'azure bot'\n    or retirementText contains 'cognitive search'\n    or retirementText contains 'azure ai search'\n| extend\n    cleanSummary = trim(' ', replace_regex(retirementSummary, '<[^>]+>', ' ')),\n    deadlineStatus = iff(retirementDate < now(), 'Past due', 'Upcoming')\n| project\n    ['Tracking ID'] = trackingId,\n    Subscription = subscriptionId,\n    Status = status,\n    ['Deadline status'] = deadlineStatus,\n    Retirement = retirementTitle,\n    Summary = cleanSummary,\n    ['Retirement date'] = retirementDate\n| order by ['Retirement date'] asc",
+              "size": 2,
+              "title": "Service Health retirements: past due and upcoming",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Deadline status",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Past due",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Upcoming",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "20ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Retirement date",
+                    "sortOrder": 1
+                  }
+                ]
+              }
+            },
+            "name": "ServiceHealthretirementspastdueandupcoming"
+          },
+          {
+            "name": "AdvisorRetirementMetadataRaw",
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"providers/Microsoft.Advisor/metadata\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2025-01-01\"},{\"key\":\"$filter\",\"value\":\"recommendationSubCategory eq 'ServiceUpgradeAndRetirement' and retirementDate ge '2024-01-01'\"},{\"key\":\"$expand\",\"value\":\"ibiza\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].properties.supportedValues[?(@.supportedResourceType == 'microsoft.botservice/botservices' || @.supportedResourceType == 'microsoft.cognitiveservices/accounts' || @.supportedResourceType == 'microsoft.machinelearningservices/workspaces' || @.supportedResourceType == 'microsoft.recommendationsservice/accounts' || @.supportedResourceType == 'microsoft.search/searchservices' || @.supportedResourceType == 'microsoft.cache/redis' || @.supportedResourceType == 'microsoft.cache/redisenterprise' || @.supportedResourceType == 'microsoft.classicstorage/storageaccounts' || @.supportedResourceType == 'microsoft.databricks/workspaces' || @.supportedResourceType == 'microsoft.datafactory/factories' || @.supportedResourceType == 'microsoft.dbformariadb/servers' || @.supportedResourceType == 'microsoft.dbformysql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/servergroupsv2' || @.supportedResourceType == 'microsoft.dbforpostgresql/servers' || @.supportedResourceType == 'microsoft.documentdb/databaseaccounts' || @.supportedResourceType == 'microsoft.eventgrid/domains' || @.supportedResourceType == 'microsoft.eventgrid/namespaces' || @.supportedResourceType == 'microsoft.eventgrid/partnernamespaces' || @.supportedResourceType == 'microsoft.eventgrid/topics' || @.supportedResourceType == 'microsoft.eventhub/namespaces' || @.supportedResourceType == 'microsoft.fluidrelay/fluidrelayservers' || @.supportedResourceType == 'microsoft.hdinsight/clusters' || @.supportedResourceType == 'microsoft.healthcareapis/services' || @.supportedResourceType == 'microsoft.healthcareapis/workspaces/fhirservices' || @.supportedResourceType == 'microsoft.kusto/clusters' || @.supportedResourceType == 'microsoft.netapp/netappaccounts/capacitypools/volumes' || @.supportedResourceType == 'microsoft.operationalinsights/workspaces' || @.supportedResourceType == 'microsoft.purview/accounts' || @.supportedResourceType == 'microsoft.relay/namespaces' || @.supportedResourceType == 'microsoft.servicebus/namespaces' || @.supportedResourceType == 'microsoft.sql/managedinstances' || @.supportedResourceType == 'microsoft.sql/servers' || @.supportedResourceType == 'microsoft.sql/servers/databases' || @.supportedResourceType == 'microsoft.sqlvirtualmachine/sqlvirtualmachines' || @.supportedResourceType == 'microsoft.storage/storageaccounts' || @.supportedResourceType == 'microsoft.storagecache/caches' || @.supportedResourceType == 'microsoft.synapse/workspaces/bigdatapools' || @.supportedResourceType == 'microsoft.synapse/workspaces/kustopools' || @.supportedResourceType == 'microsoft.apimanagement/service' || @.supportedResourceType == 'microsoft.cdn/profiles' || @.supportedResourceType == 'microsoft.maps/accounts' || @.supportedResourceType == 'microsoft.network/applicationgateways' || @.supportedResourceType == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' || @.supportedResourceType == 'microsoft.network/loadbalancers' || @.supportedResourceType == 'microsoft.network/networkwatchers/flowlogs' || @.supportedResourceType == 'microsoft.network/publicipaddresses' || @.supportedResourceType == 'microsoft.network/virtualnetworkgateways' || @.supportedResourceType == 'microsoft.aad/domainservices' || @.supportedResourceType == 'microsoft.app/containerapps' || @.supportedResourceType == 'microsoft.appplatform/spring' || @.supportedResourceType == 'microsoft.automation/automationaccounts' || @.supportedResourceType == 'microsoft.avs/privateclouds' || @.supportedResourceType == 'microsoft.batch/batchaccounts' || @.supportedResourceType == 'microsoft.compute/cloudservices' || @.supportedResourceType == 'microsoft.compute/disks' || @.supportedResourceType == 'microsoft.compute/virtualmachines' || @.supportedResourceType == 'microsoft.compute/virtualmachinescalesets' || @.supportedResourceType == 'microsoft.containerregistry/registries' || @.supportedResourceType == 'microsoft.containerservice/managedclusters' || @.supportedResourceType == 'microsoft.hybridcompute/machines' || @.supportedResourceType == 'microsoft.insights/activitylogalerts' || @.supportedResourceType == 'microsoft.insights/components' || @.supportedResourceType == 'microsoft.insights/datacollectionrules' || @.supportedResourceType == 'microsoft.insights/webtests' || @.supportedResourceType == 'microsoft.keyvault/managedhsms' || @.supportedResourceType == 'microsoft.keyvault/vaults' || @.supportedResourceType == 'microsoft.kubernetes/connectedclusters' || @.supportedResourceType == 'microsoft.kubernetesconfiguration/extensions' || @.supportedResourceType == 'microsoft.labservices/labaccounts' || @.supportedResourceType == 'microsoft.labservices/labplans' || @.supportedResourceType == 'microsoft.labservices/labs' || @.supportedResourceType == 'microsoft.monitor/accounts' || @.supportedResourceType == 'microsoft.operationsmanagement/solutions' || @.supportedResourceType == 'microsoft.recoveryservices/vaults' || @.supportedResourceType == 'microsoft.servicefabric/clusters' || @.supportedResourceType == 'microsoft.subscriptions/subscriptions' || @.supportedResourceType == 'microsoft.web/sites' || @.supportedResourceType == 'microsoft.web/staticsites')]\",\"columns\":[{\"path\":\"id\",\"columnid\":\"Id\",\"columnType\":\"string\"},{\"path\":\"resourceMetadata.singular\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"displayName\",\"columnid\":\"Retirement\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementFeatureName\",\"columnid\":\"Feature\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementDate\",\"columnid\":\"Retirement date\",\"columnType\":\"datetime\"},{\"path\":\"supportedResourceType\",\"columnid\":\"Resource type\",\"columnType\":\"string\"},{\"path\":\"learnMoreLink\",\"columnid\":\"Learn more\",\"columnType\":\"string\"}]}}]}",
+              "size": 2,
+              "title": "Advisor retirement metadata (raw)",
+              "queryType": 12,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true
+              }
+            }
+          },
+          {
+            "name": "AdvisorRetirementResourceCounts",
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0",
+              "size": 2,
+              "title": "Advisor affected-resource counts (raw)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true
+              }
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"f3dc2d14-5292-43df-a7c0-b42c5234d428\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "size": 2,
+              "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
+              "queryType": 7,
+              "showExportToExcel": true,
+              "exportedParameters": [
+                {
+                  "fieldName": "ServiceID",
+                  "parameterName": "SelectedRetirementServiceId",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ],
+              "noDataMessage": "No Advisor retirement metadata matched the selected domains.",
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "ServiceID",
+                    "formatter": 5
+                  },
+                  {
+                    "columnMatch": "Learn more",
+                    "formatter": 5
+                  },
+                  {
+                    "columnMatch": "# Resources",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "is Empty",
+                          "representation": "green",
+                          "text": "0"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "linkColumn": "Learn more",
+                      "linkTarget": "Url",
+                      "customColumnWidthSetting": "40%"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "20ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Retirement date",
+                    "sortOrder": 1
+                  }
+                ]
+              }
+            },
+            "name": "AdvisorRetirementSummary"
+          },
+          {
+            "name": "AdvisorRetirementAffectedResources",
+            "conditionalVisibilities": [
+              {
+                "parameterName": "SelectedRetirementServiceId",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              }
+            ],
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedRetirementServiceId}'\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | project\n        ResourceId = tolower(id),\n        Resource = name,\n        ['Resource group'] = resourceGroup,\n        Location = location,\n        ['Resource type'] = type,\n        Subscription = subscriptionId,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    ['Resource group'],\n    ['Resource type'],\n    Location,\n    Subscription,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, ['Resource group'], ['Resource type'], Location, Subscription, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
+              "size": 2,
+              "title": "Based on the above table, this list shows your resources affected by the selected service retirement(s).",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "noDataMessage": "No affected resources were found for the selected retirement in the current scope.",
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 13,
+                    "formatOptions": {
+                      "linkColumn": "ResourceId",
+                      "linkTarget": "Resource",
+                      "linkIsContextBlade": true,
+                      "showIcon": true,
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "serviceRetirements"
+      },
+      "name": "group-service-retirements"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
               "json": "## Azure Advisor and Resource Health\r\n\r\nReads the `advisorresources` and `healthresources` tables for AI accounts and ML\r\nworkspaces. Empty panels mean no recommendations or health events exist for the\r\nselected resources - a valid healthy result, not an error."
             },
             "name": "adHead"
@@ -919,7 +1202,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## About the data in this workbook\r\n\r\nThis workbook mixes two data sources on purpose, because neither one alone can\r\ncover an Azure AI estate.\r\n\r\n### What Azure Resource Graph can and cannot see\r\n\r\nMeasured against live fixtures, not assumed from ARM template documentation:\r\n\r\n| Resource type | Indexed in Resource Graph? |\r\n| --- | --- |\r\n| `microsoft.cognitiveservices/accounts` | **Yes** - fully, and verified to match the ARM control plane exactly |\r\n| `microsoft.cognitiveservices/accounts/projects` (Foundry projects) | **Yes** |\r\n| `microsoft.machinelearningservices/workspaces` (Hub / Project / ML) | **Yes** - rich properties |\r\n| `microsoft.cognitiveservices/accounts/deployments` (**model deployments**) | **No - zero rows. Not indexed at all.** |\r\n\r\nFor accounts, each of `identity.type`, `disableLocalAuth`, `publicNetworkAccess`,\r\n`restrictOutboundNetworkAccess`, `networkAcls.defaultAction`, `networkAcls.ipRules`,\r\n`allowProjectManagement` and `customSubDomainName` was **set through ARM and then\r\nre-read in Resource Graph** to confirm it round-trips. A blank value therefore means\r\n*not configured*, never *not indexed*.\r\n\r\n### How model data is retrieved\r\n\r\nBecause model deployments are invisible to Resource Graph:\r\n\r\n1. A Resource Graph query lists every in-scope Azure OpenAI / Foundry account.\r\n2. The Model deployments tab reads the selected account's ARM `/deployments`\r\n   endpoint directly, with one grid row per returned deployment.\r\n3. The Model retirement tab reads the regional model catalog\r\n   (`.../locations/{region}/models`) for live retirement dates and lifecycle status.\r\n\r\nThe deployments grid is deliberately not merged with the catalog: Workbooks exposes\r\nonly one join-column pair, and a composite JSONPath key can evaluate empty in some\r\nportal runtimes, turning the merge into a deployment-by-catalog cross join.\r\nRetirement dates are never hard-coded - they come from the catalog at query time.\r\n\r\n### Findings\r\n\r\n**Accounts** - API key auth enabled instead of Entra ID only; public network access\r\nwith no private endpoint; network ACLs allowing all traffic; no managed identity;\r\nno custom subdomain (which blocks Entra ID auth); Microsoft-managed keys instead of\r\nCMK; unrestricted outbound access; failed provisioning.\r\n\r\n**Workspaces** - public access with no private link; managed VNet isolation disabled;\r\ndatastores using access keys instead of identity; no CMK; no managed identity; soft\r\ndelete off; v1 legacy mode; project not linked to a hub; failed provisioning.\r\n\r\n| Severity | Condition |\r\n| --- | --- |\r\n| Critical | 6 or more findings |\r\n| High | 4-5 findings |\r\n| Medium | 2-3 findings |\r\n| Low | 1 finding |\r\n| Healthy | No findings |\r\n\r\n### Companion script\r\n\r\n`Get-AIModelRetirement.ps1` sweeps every subscription, joins each deployment to the\r\nlive model catalog, and produces a computed report with **days remaining** and\r\nseverity - including flagging deployments set to `NoAutoUpgrade` that sit on a\r\nretiring version. That computation cannot be done inside a workbook because\r\nResource Graph cannot see deployments and ARM queries cannot post-process with KQL."
+              "json": "## About the data in this workbook\r\n\r\nThis workbook mixes two data sources on purpose, because neither one alone can\r\ncover an Azure AI estate.\r\n\r\n### What Azure Resource Graph can and cannot see\r\n\r\nMeasured against live fixtures, not assumed from ARM template documentation:\r\n\r\n| Resource type | Indexed in Resource Graph? |\r\n| --- | --- |\r\n| `microsoft.cognitiveservices/accounts` | **Yes** - fully, and verified to match the ARM control plane exactly |\r\n| `microsoft.cognitiveservices/accounts/projects` (Foundry projects) | **Yes** |\r\n| `microsoft.machinelearningservices/workspaces` (Hub / Project / ML) | **Yes** - rich properties |\r\n| `microsoft.cognitiveservices/accounts/deployments` (**model deployments**) | **No - zero rows. Not indexed at all.** |\r\n\r\nFor accounts, each of `identity.type`, `disableLocalAuth`, `publicNetworkAccess`,\r\n`restrictOutboundNetworkAccess`, `networkAcls.defaultAction`, `networkAcls.ipRules`,\r\n`allowProjectManagement` and `customSubDomainName` was **set through ARM and then\r\nre-read in Resource Graph** to confirm it round-trips. A blank value therefore means\r\n*not configured*, never *not indexed*.\r\n\r\n### How model data is retrieved\r\n\r\nBecause model deployments are invisible to Resource Graph:\r\n\r\n1. A Resource Graph query lists every in-scope Azure OpenAI / Foundry account.\r\n2. The Model deployments tab reads the selected account's ARM `/deployments`\r\n   endpoint directly, with one grid row per returned deployment.\r\n3. The Model retirement tab reads the regional model catalog\r\n   (`.../locations/{region}/models`) for live retirement dates and lifecycle status.\r\n\r\nThe deployments grid is deliberately not merged with the catalog: Workbooks exposes\r\nonly one join-column pair, and a composite JSONPath key can evaluate empty in some\r\nportal runtimes, turning the merge into a deployment-by-catalog cross join.\r\nRetirement dates are never hard-coded - they come from the catalog at query time.\r\n\r\n### How service retirement data is retrieved\r\n\r\nThe **Service retirements** tab keeps Service Health and Advisor as independent\r\nsources:\r\n\r\n1. `ServiceHealthResources` from Azure Resource Graph for subscription-specific\r\n   Health Advisory retirement events retained by Azure, including elapsed deadlines.\r\n2. `providers/Microsoft.Advisor/metadata` from the ARM control plane for Microsoft's\r\n   published Service Upgrade and Retirement metadata catalog from 2024 onward,\r\n   including elapsed and future dates.\r\n\r\nThe Service Health grid is filtered to AI-related retirement titles and summaries.\r\nThe Advisor summary covers AI, Data, Network, and Infrastructure metadata. Within\r\nthe Advisor section only, direct recommendation IDs are left-joined to resource\r\ncounts from `advisorresources`; row selection filters a separate affected-resources\r\ngrid below. Advisor metadata is a global planning catalog and does not by itself\r\nprove that a service is deployed in the selected scope.\r\n\r\n### Findings\r\n\r\n**Accounts** - API key auth enabled instead of Entra ID only; public network access\r\nwith no private endpoint; network ACLs allowing all traffic; no managed identity;\r\nno custom subdomain (which blocks Entra ID auth); Microsoft-managed keys instead of\r\nCMK; unrestricted outbound access; failed provisioning.\r\n\r\n**Workspaces** - public access with no private link; managed VNet isolation disabled;\r\ndatastores using access keys instead of identity; no CMK; no managed identity; soft\r\ndelete off; v1 legacy mode; project not linked to a hub; failed provisioning.\r\n\r\n| Severity | Condition |\r\n| --- | --- |\r\n| Critical | 6 or more findings |\r\n| High | 4-5 findings |\r\n| Medium | 2-3 findings |\r\n| Low | 1 finding |\r\n| Healthy | No findings |"
             },
             "name": "abHead"
           },
