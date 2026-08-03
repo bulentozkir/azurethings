@@ -155,12 +155,20 @@
             "id": "t5",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
+            "linkLabel": "VM SKU retirements",
+            "subTarget": "vmRetirements",
+            "style": "link"
+          },
+          {
+            "id": "t6",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
             "linkLabel": "Service Health and guidance",
             "subTarget": "guidance",
             "style": "link"
           },
           {
-            "id": "t6",
+            "id": "t7",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "About the data",
@@ -946,6 +954,216 @@
           {
             "type": 1,
             "content": {
+              "json": "## VM and VMSS SKU retirements\r\n\r\nThe upper grid is limited to Azure Advisor retirement metadata whose supported\r\nresource type is:\r\n\r\n* `microsoft.compute/virtualmachines`\r\n* `microsoft.compute/virtualmachinescalesets`\r\n\r\nIt includes retirement dates from 2024 onward, so both past-due and upcoming entries\r\nremain visible. **# Resources** counts matching Advisor recommendations in the selected\r\nsubscription, resource-group and region scope.\r\n\r\nSelect a retirement row to show the matching VM or VMSS resource names below.",
+              "style": "warning"
+            },
+            "name": "vmRetirementHeader"
+          },
+          {
+            "name": "VmRetirementMetadataRaw",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"providers/Microsoft.Advisor/metadata\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2025-01-01\"},{\"key\":\"$filter\",\"value\":\"recommendationSubCategory eq 'ServiceUpgradeAndRetirement' and retirementDate ge '2024-01-01'\"},{\"key\":\"$expand\",\"value\":\"ibiza\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].properties.supportedValues[?(@.supportedResourceType == 'microsoft.compute/virtualmachines' || @.supportedResourceType == 'microsoft.compute/virtualmachinescalesets')]\",\"columns\":[{\"path\":\"id\",\"columnid\":\"Id\",\"columnType\":\"string\"},{\"path\":\"resourceMetadata.singular\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"displayName\",\"columnid\":\"Retirement\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementFeatureName\",\"columnid\":\"SKU / feature\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementDate\",\"columnid\":\"Retirement date\",\"columnType\":\"datetime\"},{\"path\":\"supportedResourceType\",\"columnid\":\"Resource type\",\"columnType\":\"string\"},{\"path\":\"learnMoreLink\",\"columnid\":\"Learn more\",\"columnType\":\"string\"}]}}]}",
+              "size": 2,
+              "title": "VM retirement metadata (raw)",
+              "queryType": 12,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true
+              }
+            },
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3
+          },
+          {
+            "name": "VmRetirementResourceCounts",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0",
+              "size": 2,
+              "title": "VM retirement affected-resource counts (raw)",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true
+              }
+            },
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"6b024297-3ae0-4505-a106-967af525af89\",\"mergeType\":\"leftouter\",\"leftTable\":\"VmRetirementMetadataRaw\",\"rightTable\":\"VmRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[VmRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].SKU / feature\",\"mergedName\":\"SKU / feature\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"6b024297-3ae0-4505-a106-967af525af89\"},{\"originalName\":\"[VmRetirementResourceCounts].ServiceID\"}]}",
+              "size": 3,
+              "title": "VM and VMSS SKU retirements (past and upcoming)",
+              "queryType": 7,
+              "showExportToExcel": true,
+              "exportedParameters": [
+                {
+                  "fieldName": "ServiceID",
+                  "parameterName": "SelectedVmRetirementServiceId",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ],
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "ServiceID",
+                    "formatter": 5
+                  },
+                  {
+                    "columnMatch": "Learn more",
+                    "formatter": 5
+                  },
+                  {
+                    "columnMatch": "# Resources",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "is Empty",
+                          "representation": "green",
+                          "text": "0"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement",
+                    "formatter": 1,
+                    "formatOptions": {
+                      "linkColumn": "Learn more",
+                      "linkTarget": "Url",
+                      "customColumnWidthSetting": "40%"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Retirement date",
+                    "sortOrder": 1
+                  }
+                ]
+              },
+              "noDataMessage": "No VM or VMSS retirement metadata was returned."
+            },
+            "name": "VmRetirementSummary"
+          },
+          {
+            "name": "VmRetirementAffectedResources",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedVmRetirementServiceId}'\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | extend\n        ResourceId = tolower(id),\n        ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n        VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n        Capacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0))\n    | project\n        ResourceId,\n        Resource = name,\n        Type = ResourceKind,\n        ['Current size'] = VmSize,\n        Capacity,\n        ['Resource group'] = resourceGroup,\n        Region = location,\n        Subscription = subscriptionId,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Type,\n    ['Current size'],\n    Capacity,\n    ['Resource group'],\n    Region,\n    Subscription,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Type, ['Current size'], Capacity, ['Resource group'], Region, Subscription, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
+              "size": 3,
+              "title": "Based on the above table, this list shows VM or VMSS resources affected by the selected retirement.",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 13,
+                    "formatOptions": {
+                      "linkColumn": "ResourceId",
+                      "linkTarget": "Resource",
+                      "linkIsContextBlade": true,
+                      "showIcon": true,
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  }
+                ]
+              },
+              "noDataMessage": "No affected VM or VMSS resources were found for the selected retirement in the current scope."
+            },
+            "conditionalVisibilities": [
+              {
+                "parameterName": "SelectedVmRetirementServiceId",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              }
+            ],
+            "type": 3
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "vmRetirements"
+      },
+      "name": "group-vm-retirements"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
               "json": "## Service Health and public migration guidance\r\n\r\nThe grid shows capacity-restriction Health Advisories visible to the selected\r\nsubscriptions. An empty grid means no matching advisory is currently retained in\r\nAzure Resource Graph; it does not prove that the subscription has no affected VMs.\r\n\r\nPublic resources:\r\n\r\n* [Previous-generation capacity limitations](https://learn.microsoft.com/azure/virtual-machines/migration/sizes/previous-gen-series-capacity-limitations)\r\n* [Migration guidance for retired VM sizes](https://learn.microsoft.com/azure/virtual-machines/sizes/lifecycle/retirement/d-ds-dv2-dsv2-ls-series-migration-guide)\r\n* [Resize a virtual machine](https://learn.microsoft.com/azure/virtual-machines/sizes/resize-vm)\r\n* [Azure VM Selector](https://azure.microsoft.com/pricing/vm-selector/)\r\n* [Azure Pricing Calculator](https://azure.microsoft.com/pricing/calculator/)",
               "style": "info"
             },
@@ -1002,7 +1220,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## About the data and limitations\r\n\r\n### Sources\r\n\r\n| Data | Source |\r\n| --- | --- |\r\n| VM size, region, zone, availability set, OS, priority | `microsoft.compute/virtualmachines` |\r\n| VMSS size, capacity, orchestration and upgrade mode | `microsoft.compute/virtualmachinescalesets` |\r\n| Autoscale minimum and maximum | `microsoft.insights/autoscalesettings` |\r\n| Customer-visible advisories | `ServiceHealthResources` |\r\n\r\n### Important semantics\r\n\r\n* Capacity limitation is **not** a shutdown notice for active v3/v4 VMs.\r\n* Several older families also have separate retirement dates and are marked\r\n  **Capacity restricted + retirement scheduled**.\r\n* The workbook reports deployed inventory and configured VMSS growth. It cannot\r\n  guarantee quota approval or regional/zone capacity.\r\n* Recommended target families are directional. Exact target SKU selection requires\r\n  workload sizing and live quota/capacity validation.\r\n\r\n### Coverage limits\r\n\r\nThe workbook directly covers Compute VMs and VM scale sets indexed by Resource Graph.\r\nManaged-service compute that does not expose a VM/VMSS resource in the selected\r\nsubscription, and service-specific pools such as Azure Batch pools, can require\r\nadditional service APIs.\r\n\r\n### Explicit affected series\r\n\r\nF, Fs, Fsv2; D, Ds, Dv2, Dsv2, Dv3, Dsv3, Dv4, Dsv4, Ddv4, Ddsv4,\r\nDav4, Dasv4; B, Bs, Av2, Amv2; Ev3, Esv3, Ev4, Esv4, Edv4, Edsv4,\r\nEav4, Easv4; G, Gs; Ls and Lsv2."
+              "json": "## About the data and limitations\r\n\r\n### Sources\r\n\r\n| Data | Source |\r\n| --- | --- |\r\n| VM size, region, zone, availability set, OS, priority | `microsoft.compute/virtualmachines` |\r\n| VMSS size, capacity, orchestration and upgrade mode | `microsoft.compute/virtualmachinescalesets` |\r\n| Autoscale minimum and maximum | `microsoft.insights/autoscalesettings` |\r\n| VM/VMSS retirement metadata | `providers/Microsoft.Advisor/metadata` |\r\n| Retirement recommendation impact | `advisorresources` joined to VM/VMSS resources |\r\n| Customer-visible advisories | `ServiceHealthResources` |\r\n\r\n### Important semantics\r\n\r\n* Capacity limitation is **not** a shutdown notice for active v3/v4 VMs.\r\n* Several older families also have separate retirement dates and are marked\r\n  **Capacity restricted + retirement scheduled**.\r\n* The **VM SKU retirements** tab is Advisor-driven and can include SKU, extension,\r\n  image, networking or platform-feature retirements that are separate from the\r\n  July 2026 capacity-limitation classifier.\r\n* The workbook reports deployed inventory and configured VMSS growth. It cannot\r\n  guarantee quota approval or regional/zone capacity.\r\n* Recommended target families are directional. Exact target SKU selection requires\r\n  workload sizing and live quota/capacity validation.\r\n\r\n### Coverage limits\r\n\r\nThe workbook directly covers Compute VMs and VM scale sets indexed by Resource Graph.\r\nManaged-service compute that does not expose a VM/VMSS resource in the selected\r\nsubscription, and service-specific pools such as Azure Batch pools, can require\r\nadditional service APIs.\r\n\r\n### Explicit affected series\r\n\r\nF, Fs, Fsv2; D, Ds, Dv2, Dsv2, Dv3, Dsv3, Dv4, Dsv4, Ddv4, Ddsv4,\r\nDav4, Dasv4; B, Bs, Av2, Amv2; Ev3, Esv3, Ev4, Esv4, Edv4, Edsv4,\r\nEav4, Easv4; G, Gs; Ls and Lsv2."
             },
             "name": "aboutText"
           }
