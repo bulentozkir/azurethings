@@ -1,0 +1,1025 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Azure VM previous-generation capacity readiness\r\n\r\nInventory, growth-risk and migration planning for VM series affected by July 2026\r\ncapacity limitations."
+      },
+      "name": "title"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "crossComponentResources": [
+          "{Subscriptions}"
+        ],
+        "parameters": [
+          {
+            "id": "p-subs",
+            "version": "KqlParameterItem/1.0",
+            "name": "Subscriptions",
+            "label": "Subscriptions",
+            "type": 2,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "isRequired": true,
+            "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where properties.state =~ 'Enabled'\n| project value = id, label = name, selected = true\n| order by label asc",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "crossComponentResources": [
+              "value::all"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "value": [
+              "value::all"
+            ],
+            "description": "Subscriptions to scan for previous-generation VM exposure."
+          },
+          {
+            "id": "p-rg",
+            "version": "KqlParameterItem/1.0",
+            "name": "ResourceGroups",
+            "label": "Resource groups",
+            "type": 2,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| summarize Resources = count() by resourceGroup\n| project value = resourceGroup, label = strcat(resourceGroup, ' (', Resources, ')'), selected = false\n| order by label asc",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "crossComponentResources": [
+              "{Subscriptions}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "selectAllValue": "*",
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "value": [
+              "value::all"
+            ],
+            "description": "Limit results to selected resource groups."
+          },
+          {
+            "id": "p-regions",
+            "version": "KqlParameterItem/1.0",
+            "name": "Regions",
+            "label": "Regions",
+            "type": 2,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| summarize Resources = count() by location\n| project value = location, label = strcat(location, ' (', Resources, ')'), selected = false\n| order by label asc",
+            "queryType": 1,
+            "resourceType": "microsoft.resourcegraph/resources",
+            "crossComponentResources": [
+              "{Subscriptions}"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [
+                "value::all"
+              ],
+              "selectAllValue": "*",
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "value": [
+              "value::all"
+            ],
+            "description": "Limit results to selected Azure regions."
+          }
+        ],
+        "style": "pills",
+        "queryType": 1,
+        "resourceType": "microsoft.resourcegraph/resources"
+      },
+      "name": "parameters"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "t1",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Overview",
+            "subTarget": "overview",
+            "style": "link"
+          },
+          {
+            "id": "t2",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Impacted VMs",
+            "subTarget": "vms",
+            "style": "link"
+          },
+          {
+            "id": "t3",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "VMSS and autoscale",
+            "subTarget": "vmss",
+            "style": "link"
+          },
+          {
+            "id": "t4",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Migration plan",
+            "subTarget": "migration",
+            "style": "link"
+          },
+          {
+            "id": "t5",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "Service Health and guidance",
+            "subTarget": "guidance",
+            "style": "link"
+          },
+          {
+            "id": "t6",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
+            "linkLabel": "About the data",
+            "subTarget": "about",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Previous-generation VM capacity readiness\r\n\r\nStarting in July 2026, Azure applies capacity limitations to specific\r\nprevious-generation VM series. Existing running VMs continue to operate; the risk is\r\nfuture quota growth, new deployments, and scale-out on hardware with limited capacity.\r\n\r\nThis workbook uses Microsoft's explicit affected-series list. It does **not** assume\r\nthat every VM whose name contains `v1` through `v4` is affected.",
+              "style": "warning"
+            },
+            "name": "ovHeader"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize\n    AffectedInstances = sum(InstanceCount),\n    StandaloneVMs = countif(ResourceKind == 'VM'),\n    ScaleSets = countif(ResourceKind == 'VMSS'),\n    GrowthAtRisk = sum(GrowthGap),\n    RetirementScheduled = sumif(InstanceCount, isnotnull(RetirementDate)),\n    AffectedSubscriptions = dcount(SubscriptionId),\n    Regions = dcount(Location)\n| extend MetricRows = pack_array(\n    strcat('1|Affected VM instances|', tostring(AffectedInstances)),\n    strcat('2|Standalone VMs|', tostring(StandaloneVMs)),\n    strcat('3|VM scale sets|', tostring(ScaleSets)),\n    strcat('4|Autoscale growth at risk|', tostring(GrowthAtRisk)),\n    strcat('5|Retirement-scheduled instances|', tostring(RetirementScheduled)),\n    strcat('6|Affected subscriptions|', tostring(AffectedSubscriptions)),\n    strcat('7|Affected regions|', tostring(Regions))\n  )\n| mv-expand MetricRow = MetricRows to typeof(string)\n| extend MetricParts = split(MetricRow, '|')\n| project\n    Rank = toint(MetricParts[0]),\n    Metric = tostring(MetricParts[1]),\n    Value = tolong(MetricParts[2])\n| order by Rank asc",
+              "size": 3,
+              "title": "Capacity exposure summary",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 0
+                    }
+                  }
+                },
+                "showBorder": true,
+                "sortCriteriaField": "Rank",
+                "sortOrderField": 1
+              }
+            },
+            "name": "Capacityexposuresummary"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize Instances = sum(InstanceCount) by Series\n| order by Instances desc",
+              "size": 1,
+              "title": "Affected instances by series",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart"
+            },
+            "name": "Affectedinstancesbyseries"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize Instances = sum(InstanceCount) by Region = Location\n| order by Instances desc",
+              "size": 1,
+              "title": "Affected instances by region",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "barchart"
+            },
+            "name": "Affectedinstancesbyregion"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize Resources = count() by Risk\n| extend RiskRank = case(Risk == 'Critical', 0, Risk == 'High', 1, Risk == 'Medium', 2, 3)\n| order by RiskRank asc\n| project-away RiskRank",
+              "size": 1,
+              "title": "Resources by risk",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "piechart"
+            },
+            "name": "Resourcesbyrisk"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| project\n    Resource,\n    Type = ResourceKind,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = Location,\n    ['VM size'] = VmSize,\n    Series,\n    ['Instances'] = InstanceCount,\n    ['Growth at risk'] = GrowthGap,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, ['Growth at risk'] desc, Resource asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "All impacted VMs and scale sets",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Capacity / lifecycle",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "retirement scheduled",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "product active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Growth at risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  },
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 13,
+                    "formatOptions": {
+                      "linkColumn": "ResourceId",
+                      "linkTarget": "Resource",
+                      "linkIsContextBlade": true,
+                      "showIcon": true,
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "AllimpactedVMsandscalesets"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "overview"
+      },
+      "name": "group-overview"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Impacted standalone virtual machines\r\n\r\n**High** means the series has a separately announced retirement date in addition to\r\nthe July 2026 capacity limitation. **Medium** means the product remains active but\r\nfuture capacity growth is restricted.\r\n\r\nTarget families are guidance, not automatic resize recommendations. Validate workload\r\nperformance, disk controller, local temporary disk, image generation, zone support,\r\nquota, capacity, and maintenance requirements before changing a production VM."
+            },
+            "name": "vmHeader"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| where ResourceKind == 'VM'\n| project\n    VM = name,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zone = Zones,\n    ['Current size'] = VmSize,\n    Series,\n    Category,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Operating system'] = OperatingSystem,\n    Priority,\n    ['Availability set'] = AvailabilitySet,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, VM asc\n| project-away RiskRank",
+              "size": 3,
+              "title": "Impacted virtual machines",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Capacity / lifecycle",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "retirement scheduled",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "product active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Growth at risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  },
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 13,
+                    "formatOptions": {
+                      "linkColumn": "ResourceId",
+                      "linkTarget": "Resource",
+                      "linkIsContextBlade": true,
+                      "showIcon": true,
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "Impactedvirtualmachines"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "vms"
+      },
+      "name": "group-vms"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## VM scale sets and autoscale growth risk\r\n\r\nThe **Growth at risk** value is:\r\n\r\n`Autoscale maximum - current configured capacity`\r\n\r\nA positive value is **Critical** because planned scale-out depends on a\r\ncapacity-restricted VM series. Fixed-capacity scale sets remain exposed to future\r\nmanual growth and migration requirements.",
+              "style": "warning"
+            },
+            "name": "vmssHeader"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| where ResourceKind == 'VMSS'\n| project\n    ['Scale set'] = name,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zones,\n    ['Current size'] = VmSize,\n    Series,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Current capacity'] = CurrentCapacity,\n    ['Autoscale minimum'] = AutoscaleMin,\n    ['Autoscale maximum'] = AutoscaleMax,\n    ['Growth at risk'] = GrowthGap,\n    ['Orchestration mode'] = OrchestrationMode,\n    ['Upgrade mode'] = UpgradeMode,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, ['Growth at risk'] desc, ['Scale set'] asc\n| project-away RiskRank",
+              "size": 3,
+              "title": "Impacted VM scale sets",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Capacity / lifecycle",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "retirement scheduled",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "product active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Growth at risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  },
+                  {
+                    "columnMatch": "ResourceId",
+                    "formatter": 13,
+                    "formatOptions": {
+                      "linkColumn": "ResourceId",
+                      "linkTarget": "Resource",
+                      "linkIsContextBlade": true,
+                      "showIcon": true,
+                      "customColumnWidthSetting": "32ch"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "ImpactedVMscalesets"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "vmss"
+      },
+      "name": "group-vmss"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Migration planning\r\n\r\nThese are family-level target options from public Microsoft guidance, not exact SKU\r\nrecommendations. Validate each workload before migration.\r\n\r\nImportant compatibility checks:\r\n\r\n* v6/v7 sizes can require Generation 2 images, NVMe, and MANA-compatible operating systems.\r\n* Resizing changes VM availability and causes a restart; some changes require deallocation.\r\n* Availability-set migrations can require coordinated deallocation.\r\n* VMSS model changes must be rolled out to instances.\r\n* Review reservations and savings plans before retiring an older size."
+            },
+            "name": "migrationHeader"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Regions = dcount(Location),\n    RiskRank = min(RiskRank)\n  by Series, Category, ['Capacity / lifecycle'] = LifecycleStatus, ['Retirement date'] = RetirementDate, ['Target family guidance'] = RecommendedTarget, Risk\n| order by RiskRank asc, ['Growth at risk'] desc, Instances desc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Migration plan by VM series",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Capacity / lifecycle",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "retirement scheduled",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "product active",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "columnMatch": "Growth at risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  },
+                  {
+                    "columnMatch": "Retirement date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "MigrationplanbyVMseries"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.compute/virtualmachines'\n    or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| extend\n    ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n    TargetId = tolower(id),\n    VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n    CurrentCapacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0)),\n    OperatingSystem = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.osType), ''),\n    Priority = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.priority), ''),\n    AvailabilitySet = iff(type =~ 'microsoft.compute/virtualmachines', extract('/availabilitySets/([^/]+)$', 1, tostring(properties.availabilitySet.id)), ''),\n    EphemeralOS = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.storageProfile.osDisk.diffDiskSettings.option) =~ 'Local', false),\n    OrchestrationMode = tostring(properties.orchestrationMode),\n    UpgradeMode = tostring(properties.upgradePolicy.mode),\n    Zones = strcat_array(zones, ', ')\n| extend _sizeKey = toupper(VmSize)\n| extend Series = case(\n    _sizeKey matches regex '^STANDARD_F[0-9]+S_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+_V2$', 'Fsv2',\n    _sizeKey matches regex '^STANDARD_FS[0-9]+$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+[A-Z]*S$', 'Fs',\n    _sizeKey matches regex '^STANDARD_F[0-9]+$', 'F',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?DS_V4$', 'Ddsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?D_V4$', 'Ddv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+AS_V4$', 'Dasv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+A_V4$', 'Dav4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V4$', 'Dsv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V4$', 'Dv4',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V3$', 'Dsv3',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V3$', 'Dv3',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?S_V2$', 'Dsv2',\n    _sizeKey matches regex '^STANDARD_D[0-9]+I?_V2$', 'Dv2',\n    _sizeKey matches regex '^STANDARD_DS[0-9]+$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+S$', 'Ds',\n    _sizeKey matches regex '^STANDARD_D[0-9]+$', 'D',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*S$', 'Bs',\n    _sizeKey matches regex '^STANDARD_B[0-9]+[A-Z]*$', 'B',\n    _sizeKey matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    _sizeKey matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?DS_V4$', 'Edsv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?D_V4$', 'Edv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+AS_V4$', 'Easv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+A_V4$', 'Eav4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V4$', 'Esv4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V4$', 'Ev4',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?S_V3$', 'Esv3',\n    _sizeKey matches regex '^STANDARD_E[0-9]+I?_V3$', 'Ev3',\n    _sizeKey matches regex '^STANDARD_GS[0-9]+$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+S$', 'Gs',\n    _sizeKey matches regex '^STANDARD_G[0-9]+$', 'G',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    _sizeKey matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    '')\n| extend Category = case(\n    Series in ('F','Fs','Fsv2'), 'Compute optimized',\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4','B','Bs','Av2','Amv2'), 'General purpose',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4','G','Gs'), 'Memory optimized',\n    Series in ('Ls','Lsv2'), 'Storage optimized',\n    '')\n| extend RetirementDate = case(\n    Series in ('D','Ds','Dv2','Dsv2','Ls'), datetime(2028-05-01),\n    Series in ('Av2','Amv2','B','Bs','F','Fs','Fsv2','G','Gs','Lsv2'), datetime(2028-11-15),\n    todatetime(''))\n| extend LifecycleStatus = case(\n    isnotnull(RetirementDate), 'Capacity restricted + retirement scheduled',\n    isnotempty(Series), 'Capacity restricted; product active',\n    'Current generation')\n| extend RecommendedTarget = case(\n    Series in ('D','Ds','Dv2','Dsv2','Dv3','Dsv3','Dv4','Dsv4','Ddv4','Ddsv4','Dav4','Dasv4'), 'Dv5/Dsv5, Dv6/Dsv6, or Dv7/Dsv7',\n    Series in ('Ev3','Esv3','Ev4','Esv4','Edv4','Edsv4','Eav4','Easv4'), 'Ev5/Esv5, Esv6, or Esv7',\n    Series in ('Av2','Amv2'), 'Bsv2/Basv2 or D/E v5-v6',\n    Series in ('B','Bs'), 'Bsv2/Basv2 or Dlsv5-v6',\n    Series in ('F','Fs','Fsv2'), 'Dlsv5-v6, Dsv5, or Falsv6',\n    Series in ('G','Gs'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    Series in ('Ls','Lsv2'), 'Lsv3/Lasv3 or Lsv4/Lasv4',\n    '')\n| project-away _sizeKey\n| where isnotempty(Series)\n| join kind=leftouter (\n    resources\n    | where type =~ 'microsoft.insights/autoscalesettings'\n    | mv-expand Profile = properties.profiles\n    | extend\n        TargetId = tolower(tostring(properties.targetResourceUri)),\n        ProfileMin = toint(Profile.capacity.minimum),\n        ProfileMax = toint(Profile.capacity.maximum)\n    | summarize AutoscaleMin = min(ProfileMin), AutoscaleMax = max(ProfileMax), AutoscaleProfiles = count() by TargetId\n  ) on TargetId\n| extend\n    AutoscaleMin = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMin, CurrentCapacity)),\n    AutoscaleMax = iff(ResourceKind == 'VM', 1, coalesce(AutoscaleMax, CurrentCapacity))\n| extend GrowthGap = iff(AutoscaleMax > CurrentCapacity, AutoscaleMax - CurrentCapacity, 0)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    InstanceCount = CurrentCapacity,\n    Risk = case(ResourceKind == 'VMSS' and GrowthGap > 0, 'Critical', isnotnull(RetirementDate), 'High', 'Medium'),\n    RiskReason = case(\n        ResourceKind == 'VMSS' and GrowthGap > 0, 'Autoscale or planned growth uses a capacity-restricted series',\n        isnotnull(RetirementDate), 'Retirement scheduled and capacity growth restricted',\n        'Capacity growth restricted'),\n    MigrationConsiderations = strcat_array(array_concat(\n        iff(ResourceKind == 'VM' and isnotempty(AvailabilitySet), pack_array('Coordinate availability-set migration'), dynamic([])),\n        iff(ResourceKind == 'VM' and isnotempty(Zones), pack_array('Validate target size in current zone'), dynamic([])),\n        iff(ResourceKind == 'VM' and EphemeralOS, pack_array('Ephemeral OS disk - plan redeployment'), dynamic([])),\n        iff(ResourceKind == 'VM' and Priority =~ 'Spot', pack_array('Spot workload - validate replacement capacity'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and GrowthGap > 0, pack_array(strcat('Autoscale growth gap: ', tostring(GrowthGap))), dynamic([])),\n        iff(ResourceKind == 'VMSS' and isnotempty(Zones), pack_array('Validate target size in every configured zone'), dynamic([])),\n        iff(ResourceKind == 'VMSS' and OrchestrationMode =~ 'Uniform', pack_array('Coordinate model and instance upgrade'), dynamic([]))\n      ), ' | '),\n    RiskRank = case(ResourceKind == 'VMSS' and GrowthGap > 0, 0, isnotnull(RetirementDate), 1, 2),\n    Resource = name,\n    Location = location,\n    ResourceId = id,\n    ResourceGroup = resourceGroup,\n    SubscriptionId = subscriptionId\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Series = strcat_array(make_set(Series, 20), ', ')\n  by Subscription, Region = Location\n| order by ['Growth at risk'] desc, Instances desc",
+              "size": 2,
+              "title": "Regional migration concentration",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Growth at risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "==",
+                          "thresholdValue": "0",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": ">",
+                          "thresholdValue": "0",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    },
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "style": "decimal",
+                        "maximumFractionDigits": 0
+                      },
+                      "emptyValCustomText": "0"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "Regionalmigrationconcentration"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "migration"
+      },
+      "name": "group-migration"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## Service Health and public migration guidance\r\n\r\nThe grid shows capacity-restriction Health Advisories visible to the selected\r\nsubscriptions. An empty grid means no matching advisory is currently retained in\r\nAzure Resource Graph; it does not prove that the subscription has no affected VMs.\r\n\r\nPublic resources:\r\n\r\n* [Previous-generation capacity limitations](https://learn.microsoft.com/azure/virtual-machines/migration/sizes/previous-gen-series-capacity-limitations)\r\n* [Migration guidance for retired VM sizes](https://learn.microsoft.com/azure/virtual-machines/sizes/lifecycle/retirement/d-ds-dv2-dsv2-ls-series-migration-guide)\r\n* [Resize a virtual machine](https://learn.microsoft.com/azure/virtual-machines/sizes/resize-vm)\r\n* [Azure VM Selector](https://azure.microsoft.com/pricing/vm-selector/)\r\n* [Azure Pricing Calculator](https://azure.microsoft.com/pricing/calculator/)",
+              "style": "info"
+            },
+            "name": "guidanceHeader"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "servicehealthresources\n| where type =~ 'microsoft.resourcehealth/events'\n| extend\n    EventType = tostring(properties.EventType),\n    EventSubType = tostring(properties.EventSubType),\n    Status = tostring(properties.Status),\n    Title = tostring(properties.Title),\n    TrackingId = tostring(properties.TrackingId),\n    SummaryHtml = tostring(properties.Summary),\n    EventDate = todatetime(tolong(properties.ImpactMitigationTime))\n| where EventType == 'HealthAdvisory'\n| extend NoticeText = tolower(strcat(Title, ' ', SummaryHtml))\n| where NoticeText contains 'previous-generation'\n    or NoticeText contains 'previous generation'\n    or NoticeText contains 'capacity growth restriction'\n    or NoticeText contains 'v1-v4'\n| extend Summary = trim(' ', replace_regex(SummaryHtml, '<[^>]+>', ' '))\n| project\n    ['Tracking ID'] = TrackingId,\n    Subscription = subscriptionId,\n    Status,\n    Title,\n    Summary,\n    ['Advisory date'] = EventDate\n| order by ['Advisory date'] desc",
+              "size": 2,
+              "title": "Previous-generation VM capacity advisories",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Advisory date",
+                    "formatter": 6,
+                    "formatOptions": {
+                      "customColumnWidthSetting": "18ch"
+                    },
+                    "dateFormat": {
+                      "showUtcTime": true,
+                      "formatName": "shortDatePattern"
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "PreviousgenerationVMcapacityadvisories"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "guidance"
+      },
+      "name": "group-guidance"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## About the data and limitations\r\n\r\n### Sources\r\n\r\n| Data | Source |\r\n| --- | --- |\r\n| VM size, region, zone, availability set, OS, priority | `microsoft.compute/virtualmachines` |\r\n| VMSS size, capacity, orchestration and upgrade mode | `microsoft.compute/virtualmachinescalesets` |\r\n| Autoscale minimum and maximum | `microsoft.insights/autoscalesettings` |\r\n| Customer-visible advisories | `ServiceHealthResources` |\r\n\r\n### Important semantics\r\n\r\n* Capacity limitation is **not** a shutdown notice for active v3/v4 VMs.\r\n* Several older families also have separate retirement dates and are marked\r\n  **Capacity restricted + retirement scheduled**.\r\n* The workbook reports deployed inventory and configured VMSS growth. It cannot\r\n  guarantee quota approval or regional/zone capacity.\r\n* Recommended target families are directional. Exact target SKU selection requires\r\n  workload sizing and live quota/capacity validation.\r\n\r\n### Coverage limits\r\n\r\nThe workbook directly covers Compute VMs and VM scale sets indexed by Resource Graph.\r\nManaged-service compute that does not expose a VM/VMSS resource in the selected\r\nsubscription, and service-specific pools such as Azure Batch pools, can require\r\nadditional service APIs.\r\n\r\n### Explicit affected series\r\n\r\nF, Fs, Fsv2; D, Ds, Dv2, Dsv2, Dv3, Dsv3, Dv4, Dsv4, Ddv4, Ddsv4,\r\nDav4, Dasv4; B, Bs, Av2, Amv2; Ev3, Esv3, Ev4, Esv4, Edv4, Edsv4,\r\nEav4, Easv4; G, Gs; Ls and Lsv2."
+            },
+            "name": "aboutText"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "about"
+      },
+      "name": "group-about"
+    }
+  ],
+  "defaultResourceIds": [],
+  "fallbackResourceIds": [
+    "Azure Monitor"
+  ],
+  "fromTemplateId": "community-VMPreviousGenerationCapacityReadiness",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
