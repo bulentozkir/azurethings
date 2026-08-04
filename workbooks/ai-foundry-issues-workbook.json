@@ -382,7 +382,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend acctKind   = tostring(kind)\n| extend isModelHost = (acctKind in~ ('OpenAI','AIServices'))\n| extend skuName    = tostring(sku.name)\n| extend identityType = tostring(identity.type)\n| extend pna        = tostring(properties.publicNetworkAccess)\n| extend localAuthDisabled = tobool(properties.disableLocalAuth)\n| extend subdomain  = tostring(properties.customSubDomainName)\n| extend restrictOutbound = tobool(properties.restrictOutboundNetworkAccess)\n| extend netDefault = tostring(properties.networkAcls.defaultAction)\n| extend ipRuleCount = toint(array_length(todynamic(properties.networkAcls.ipRules)))\n| extend vnetRuleCount = toint(array_length(todynamic(properties.networkAcls.virtualNetworkRules)))\n| extend cmkSource  = tostring(properties.encryption.keySource)\n| extend allowProjectMgmt = tobool(properties.allowProjectManagement)\n| extend state      = tostring(properties.provisioningState)\n| extend created    = todatetime(properties.dateCreated)\n| extend endpoint   = tostring(properties.endpoint)\n| extend isMigrated = tobool(properties.isMigrated)\n| extend peCount    = toint(array_length(todynamic(properties.privateEndpointConnections)))\n| extend KindLabel  = case(\n      acctKind =~ 'OpenAI',     'Azure OpenAI',\n      acctKind =~ 'AIServices', 'Microsoft Foundry (AI Services)',\n      acctKind =~ 'CognitiveServices', 'Cognitive Services (multi-service)',\n      acctKind)\n| extend IssueList = array_concat(\n    iff(localAuthDisabled != true,                      pack_array('API key (local) auth enabled - prefer Entra ID'), dynamic([])),\n    iff(pna =~ 'Enabled' and peCount == 0,              pack_array('Public network access with no private endpoint'), dynamic([])),\n    iff(pna =~ 'Enabled' and netDefault !~ 'Deny',      pack_array('Network ACLs allow all traffic'), dynamic([])),\n    iff(isempty(identityType) or identityType =~ 'None', pack_array('No managed identity'), dynamic([])),\n    iff(isModelHost and isempty(subdomain),             pack_array('No custom subdomain - Entra ID auth unavailable'), dynamic([])),\n    iff(isempty(cmkSource) or cmkSource =~ 'Microsoft.CognitiveServices', pack_array('Microsoft-managed keys (no CMK)'), dynamic([])),\n    iff(isModelHost and restrictOutbound != true,       pack_array('Outbound network access unrestricted'), dynamic([])),\n    iff(state !~ 'Succeeded',                           pack_array(strcat('Provisioning state: ', state)), dynamic([]))\n  )\n| extend IssueCount = array_length(IssueList)\n| extend Issues     = strcat_array(IssueList, ' | ')\n| extend Severity = case(\n      IssueCount >= 6, 'Critical',\n      IssueCount >= 4, 'High',\n      IssueCount >= 2, 'Medium',\n      IssueCount >= 1, 'Low',\n                       'Healthy')\n| extend SeverityRank = case(Severity == 'Critical', 0, Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| project\n    Account = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Resource group'] = resourceGroup,\n    Region = location,\n    SKU = skuName,\n    State = state,\n    Severity,\n    Findings = toint(IssueCount),\n    Detail = iff(IssueCount == 0, 'No findings', Issues),\n    SeverityRank,\n    ResourceId = id\n| order by SeverityRank asc, Findings desc, Account asc\n| project-away SeverityRank",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend acctKind   = tostring(kind)\n| extend isModelHost = (acctKind in~ ('OpenAI','AIServices'))\n| extend skuName    = tostring(sku.name)\n| extend identityType = tostring(identity.type)\n| extend pna        = tostring(properties.publicNetworkAccess)\n| extend localAuthDisabled = tobool(properties.disableLocalAuth)\n| extend subdomain  = tostring(properties.customSubDomainName)\n| extend restrictOutbound = tobool(properties.restrictOutboundNetworkAccess)\n| extend netDefault = tostring(properties.networkAcls.defaultAction)\n| extend ipRuleCount = toint(array_length(todynamic(properties.networkAcls.ipRules)))\n| extend vnetRuleCount = toint(array_length(todynamic(properties.networkAcls.virtualNetworkRules)))\n| extend cmkSource  = tostring(properties.encryption.keySource)\n| extend allowProjectMgmt = tobool(properties.allowProjectManagement)\n| extend state      = tostring(properties.provisioningState)\n| extend created    = todatetime(properties.dateCreated)\n| extend endpoint   = tostring(properties.endpoint)\n| extend isMigrated = tobool(properties.isMigrated)\n| extend peCount    = toint(array_length(todynamic(properties.privateEndpointConnections)))\n| extend KindLabel  = case(\n      acctKind =~ 'OpenAI',     'Azure OpenAI',\n      acctKind =~ 'AIServices', 'Microsoft Foundry (AI Services)',\n      acctKind =~ 'CognitiveServices', 'Cognitive Services (multi-service)',\n      acctKind)\n| extend IssueList = array_concat(\n    iff(localAuthDisabled != true,                      pack_array('API key (local) auth enabled - prefer Entra ID'), dynamic([])),\n    iff(pna =~ 'Enabled' and peCount == 0,              pack_array('Public network access with no private endpoint'), dynamic([])),\n    iff(pna =~ 'Enabled' and netDefault !~ 'Deny',      pack_array('Network ACLs allow all traffic'), dynamic([])),\n    iff(isempty(identityType) or identityType =~ 'None', pack_array('No managed identity'), dynamic([])),\n    iff(isModelHost and isempty(subdomain),             pack_array('No custom subdomain - Entra ID auth unavailable'), dynamic([])),\n    iff(isempty(cmkSource) or cmkSource =~ 'Microsoft.CognitiveServices', pack_array('Microsoft-managed keys (no CMK)'), dynamic([])),\n    iff(isModelHost and restrictOutbound != true,       pack_array('Outbound network access unrestricted'), dynamic([])),\n    iff(state !~ 'Succeeded',                           pack_array(strcat('Provisioning state: ', state)), dynamic([]))\n  )\n| extend IssueCount = array_length(IssueList)\n| extend Issues     = strcat_array(IssueList, ' | ')\n| extend Severity = case(\n      IssueCount >= 6, 'Critical',\n      IssueCount >= 4, 'High',\n      IssueCount >= 2, 'Medium',\n      IssueCount >= 1, 'Low',\n                       'Healthy')\n| extend SeverityRank = case(Severity == 'Critical', 0, Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| project\n    Account = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Resource group'] = resourceGroup,\n    Region = location,\n    SKU = skuName,\n    State = state,\n    Severity,\n    Findings = toint(IssueCount),\n    Detail = iff(IssueCount == 0, 'No findings', Issues),\n    SeverityRank,\n    ResourceId = id\n| order by Findings desc, SeverityRank asc, Account asc\n| project-away SeverityRank",
               "size": 2,
               "title": "All AI accounts and findings",
               "queryType": 1,
@@ -439,6 +439,12 @@
                       ]
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Findings",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -480,13 +486,13 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
+              "exportFieldName": "ResourceId",
               "exportDefaultValue": "",
+              "exportParameterName": "ModelAccounts",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
-              },
-              "exportParameterName": "ModelAccounts",
-              "exportFieldName": "ResourceId"
+              }
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
           },
@@ -508,7 +514,13 @@
               "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
-                "filter": true
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "Capacity",
+                    "sortOrder": 2
+                  }
+                ]
               }
             },
             "name": "ModelDeployments"
@@ -592,6 +604,12 @@
                       ]
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Max capacity",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -643,7 +661,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend acctKind   = tostring(kind)\n| extend isModelHost = (acctKind in~ ('OpenAI','AIServices'))\n| extend skuName    = tostring(sku.name)\n| extend identityType = tostring(identity.type)\n| extend pna        = tostring(properties.publicNetworkAccess)\n| extend localAuthDisabled = tobool(properties.disableLocalAuth)\n| extend subdomain  = tostring(properties.customSubDomainName)\n| extend restrictOutbound = tobool(properties.restrictOutboundNetworkAccess)\n| extend netDefault = tostring(properties.networkAcls.defaultAction)\n| extend ipRuleCount = toint(array_length(todynamic(properties.networkAcls.ipRules)))\n| extend vnetRuleCount = toint(array_length(todynamic(properties.networkAcls.virtualNetworkRules)))\n| extend cmkSource  = tostring(properties.encryption.keySource)\n| extend allowProjectMgmt = tobool(properties.allowProjectManagement)\n| extend state      = tostring(properties.provisioningState)\n| extend created    = todatetime(properties.dateCreated)\n| extend endpoint   = tostring(properties.endpoint)\n| extend isMigrated = tobool(properties.isMigrated)\n| extend peCount    = toint(array_length(todynamic(properties.privateEndpointConnections)))\n| extend KindLabel  = case(\n      acctKind =~ 'OpenAI',     'Azure OpenAI',\n      acctKind =~ 'AIServices', 'Microsoft Foundry (AI Services)',\n      acctKind =~ 'CognitiveServices', 'Cognitive Services (multi-service)',\n      acctKind)\n| project\n    Account = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Resource group'] = resourceGroup,\n    ['Public access'] = iff(isempty(pna), 'Unknown', pna),\n    ['Network default action'] = iff(isempty(netDefault), 'Allow (not configured)', netDefault),\n    ['IP rules'] = coalesce(ipRuleCount, 0),\n    ['VNet rules'] = coalesce(vnetRuleCount, 0),\n    ['Private endpoints'] = coalesce(peCount, 0),\n    ['Outbound restricted'] = case(isnull(restrictOutbound), 'No', restrictOutbound == true, 'Yes', 'No'),\n    Endpoint = endpoint,\n    ResourceId = id\n| order by ['Private endpoints'] asc, Account asc",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend acctKind   = tostring(kind)\n| extend isModelHost = (acctKind in~ ('OpenAI','AIServices'))\n| extend skuName    = tostring(sku.name)\n| extend identityType = tostring(identity.type)\n| extend pna        = tostring(properties.publicNetworkAccess)\n| extend localAuthDisabled = tobool(properties.disableLocalAuth)\n| extend subdomain  = tostring(properties.customSubDomainName)\n| extend restrictOutbound = tobool(properties.restrictOutboundNetworkAccess)\n| extend netDefault = tostring(properties.networkAcls.defaultAction)\n| extend ipRuleCount = toint(array_length(todynamic(properties.networkAcls.ipRules)))\n| extend vnetRuleCount = toint(array_length(todynamic(properties.networkAcls.virtualNetworkRules)))\n| extend cmkSource  = tostring(properties.encryption.keySource)\n| extend allowProjectMgmt = tobool(properties.allowProjectManagement)\n| extend state      = tostring(properties.provisioningState)\n| extend created    = todatetime(properties.dateCreated)\n| extend endpoint   = tostring(properties.endpoint)\n| extend isMigrated = tobool(properties.isMigrated)\n| extend peCount    = toint(array_length(todynamic(properties.privateEndpointConnections)))\n| extend KindLabel  = case(\n      acctKind =~ 'OpenAI',     'Azure OpenAI',\n      acctKind =~ 'AIServices', 'Microsoft Foundry (AI Services)',\n      acctKind =~ 'CognitiveServices', 'Cognitive Services (multi-service)',\n      acctKind)\n| project\n    Account = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Resource group'] = resourceGroup,\n    ['Public access'] = iff(isempty(pna), 'Unknown', pna),\n    ['Network default action'] = iff(isempty(netDefault), 'Allow (not configured)', netDefault),\n    ['IP rules'] = coalesce(ipRuleCount, 0),\n    ['VNet rules'] = coalesce(vnetRuleCount, 0),\n    ['Private endpoints'] = coalesce(peCount, 0),\n    ['Outbound restricted'] = case(isnull(restrictOutbound), 'No', restrictOutbound == true, 'Yes', 'No'),\n    Endpoint = endpoint,\n    ResourceId = id\n| order by ['IP rules'] desc, ['VNet rules'] desc, ['Private endpoints'] desc, Account asc",
               "size": 2,
               "title": "Network exposure",
               "queryType": 1,
@@ -654,7 +672,21 @@
               "showExportToExcel": true,
               "gridSettings": {
                 "rowLimit": 1000,
-                "filter": true
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "IP rules",
+                    "sortOrder": 2
+                  },
+                  {
+                    "itemKey": "VNet rules",
+                    "sortOrder": 2
+                  },
+                  {
+                    "itemKey": "Private endpoints",
+                    "sortOrder": 2
+                  }
+                ]
               }
             },
             "name": "Networkexposure"
@@ -821,7 +853,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "resources\n| where type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend wsKind   = tostring(kind)\n| extend hubId    = tostring(properties.hubResourceId)\n| extend pna      = tostring(properties.publicNetworkAccess)\n| extend isolation = tostring(properties.managedNetwork.isolationMode)\n| extend authMode = tostring(properties.systemDatastoresAuthMode)\n| extend cmkEnabled = tobool(properties.enableServiceSideCMKEncryption)\n| extend hbi      = tobool(properties.hbiWorkspace)\n| extend softDelete = tobool(properties.softDeleteEnabled)\n| extend privateLinks = toint(properties.privateLinkCount)\n| extend v1Legacy = tobool(properties.v1LegacyMode)\n| extend dataIsolation = tobool(properties.enableDataIsolation)\n| extend identityType = tostring(identity.type)\n| extend state    = tostring(properties.provisioningState)\n| extend friendly = tostring(properties.friendlyName)\n| extend created  = todatetime(properties.creationTime)\n| extend storageId = tostring(properties.storageAccount)\n| extend kvId     = tostring(properties.keyVault)\n| extend KindLabel = case(\n      wsKind =~ 'Hub',     'AI Hub',\n      wsKind =~ 'Project', 'AI Project',\n      wsKind =~ 'Default', 'Azure ML workspace',\n      wsKind =~ 'FeatureStore', 'Feature store',\n      iff(isempty(wsKind), 'Azure ML workspace', wsKind))\n| extend IssueList = array_concat(\n    iff(pna =~ 'Enabled' and privateLinks == 0,   pack_array('Public network access with no private link'), dynamic([])),\n    iff(isolation =~ 'Disabled',                  pack_array('Managed VNet isolation disabled'), dynamic([])),\n    iff(authMode =~ 'accesskey',                  pack_array('Datastores use access keys - prefer identity'), dynamic([])),\n    iff(cmkEnabled != true,                       pack_array('No customer-managed key encryption'), dynamic([])),\n    iff(isempty(identityType) or identityType =~ 'None', pack_array('No managed identity'), dynamic([])),\n    iff(softDelete != true,                       pack_array('Soft delete not enabled'), dynamic([])),\n    iff(v1Legacy == true,                         pack_array('v1 legacy mode enabled'), dynamic([])),\n    iff(wsKind =~ 'Project' and isempty(hubId),   pack_array('Project not linked to a hub'), dynamic([])),\n    iff(state !~ 'Succeeded',                     pack_array(strcat('Provisioning state: ', state)), dynamic([]))\n  )\n| extend IssueCount = array_length(IssueList)\n| extend Issues     = strcat_array(IssueList, ' | ')\n| extend Severity = case(\n      IssueCount >= 6, 'Critical',\n      IssueCount >= 4, 'High',\n      IssueCount >= 2, 'Medium',\n      IssueCount >= 1, 'Low',\n                       'Healthy')\n| extend SeverityRank = case(Severity == 'Critical', 0, Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| extend hubName = iff(isempty(hubId), '-', tostring(split(hubId, '/')[-1]))\n| project\n    Workspace = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Parent hub'] = hubName,\n    ['Resource group'] = resourceGroup,\n    Region = location,\n    ['Public access'] = iff(isempty(pna), 'Unknown', pna),\n    ['Managed VNet'] = iff(isempty(isolation), 'Unknown', isolation),\n    ['Datastore auth'] = iff(isempty(authMode), 'Unknown', authMode),\n    ['Private links'] = coalesce(privateLinks, 0),\n    Severity,\n    Findings = toint(IssueCount),\n    Detail = iff(IssueCount == 0, 'No findings', Issues),\n    SeverityRank,\n    ResourceId = id\n| order by SeverityRank asc, Workspace asc\n| project-away SeverityRank",
+              "query": "resources\n| where type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend wsKind   = tostring(kind)\n| extend hubId    = tostring(properties.hubResourceId)\n| extend pna      = tostring(properties.publicNetworkAccess)\n| extend isolation = tostring(properties.managedNetwork.isolationMode)\n| extend authMode = tostring(properties.systemDatastoresAuthMode)\n| extend cmkEnabled = tobool(properties.enableServiceSideCMKEncryption)\n| extend hbi      = tobool(properties.hbiWorkspace)\n| extend softDelete = tobool(properties.softDeleteEnabled)\n| extend privateLinks = toint(properties.privateLinkCount)\n| extend v1Legacy = tobool(properties.v1LegacyMode)\n| extend dataIsolation = tobool(properties.enableDataIsolation)\n| extend identityType = tostring(identity.type)\n| extend state    = tostring(properties.provisioningState)\n| extend friendly = tostring(properties.friendlyName)\n| extend created  = todatetime(properties.creationTime)\n| extend storageId = tostring(properties.storageAccount)\n| extend kvId     = tostring(properties.keyVault)\n| extend KindLabel = case(\n      wsKind =~ 'Hub',     'AI Hub',\n      wsKind =~ 'Project', 'AI Project',\n      wsKind =~ 'Default', 'Azure ML workspace',\n      wsKind =~ 'FeatureStore', 'Feature store',\n      iff(isempty(wsKind), 'Azure ML workspace', wsKind))\n| extend IssueList = array_concat(\n    iff(pna =~ 'Enabled' and privateLinks == 0,   pack_array('Public network access with no private link'), dynamic([])),\n    iff(isolation =~ 'Disabled',                  pack_array('Managed VNet isolation disabled'), dynamic([])),\n    iff(authMode =~ 'accesskey',                  pack_array('Datastores use access keys - prefer identity'), dynamic([])),\n    iff(cmkEnabled != true,                       pack_array('No customer-managed key encryption'), dynamic([])),\n    iff(isempty(identityType) or identityType =~ 'None', pack_array('No managed identity'), dynamic([])),\n    iff(softDelete != true,                       pack_array('Soft delete not enabled'), dynamic([])),\n    iff(v1Legacy == true,                         pack_array('v1 legacy mode enabled'), dynamic([])),\n    iff(wsKind =~ 'Project' and isempty(hubId),   pack_array('Project not linked to a hub'), dynamic([])),\n    iff(state !~ 'Succeeded',                     pack_array(strcat('Provisioning state: ', state)), dynamic([]))\n  )\n| extend IssueCount = array_length(IssueList)\n| extend Issues     = strcat_array(IssueList, ' | ')\n| extend Severity = case(\n      IssueCount >= 6, 'Critical',\n      IssueCount >= 4, 'High',\n      IssueCount >= 2, 'Medium',\n      IssueCount >= 1, 'Low',\n                       'Healthy')\n| extend SeverityRank = case(Severity == 'Critical', 0, Severity == 'High', 1, Severity == 'Medium', 2, Severity == 'Low', 3, 4)\n| extend hubName = iff(isempty(hubId), '-', tostring(split(hubId, '/')[-1]))\n| project\n    Workspace = name,\n    Subscription,\n    Kind = KindLabel,\n    ['Parent hub'] = hubName,\n    ['Resource group'] = resourceGroup,\n    Region = location,\n    ['Public access'] = iff(isempty(pna), 'Unknown', pna),\n    ['Managed VNet'] = iff(isempty(isolation), 'Unknown', isolation),\n    ['Datastore auth'] = iff(isempty(authMode), 'Unknown', authMode),\n    ['Private links'] = coalesce(privateLinks, 0),\n    Severity,\n    Findings = toint(IssueCount),\n    Detail = iff(IssueCount == 0, 'No findings', Issues),\n    SeverityRank,\n    ResourceId = id\n| order by Findings desc, ['Private links'] desc, SeverityRank asc, Workspace asc\n| project-away SeverityRank",
               "size": 2,
               "title": "Workspaces and findings",
               "queryType": 1,
@@ -877,6 +909,16 @@
                         }
                       ]
                     }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Findings",
+                    "sortOrder": 2
+                  },
+                  {
+                    "itemKey": "Private links",
+                    "sortOrder": 2
                   }
                 ]
               }
@@ -972,7 +1014,6 @@
             "name": "ServiceHealthretirementspastdueandupcoming"
           },
           {
-            "name": "AdvisorRetirementMetadataRaw",
             "content": {
               "version": "KqlItem/1.0",
               "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"providers/Microsoft.Advisor/metadata\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2025-01-01\"},{\"key\":\"$filter\",\"value\":\"recommendationSubCategory eq 'ServiceUpgradeAndRetirement' and retirementDate ge '2024-01-01'\"},{\"key\":\"$expand\",\"value\":\"ibiza\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].properties.supportedValues[?(@.supportedResourceType == 'microsoft.botservice/botservices' || @.supportedResourceType == 'microsoft.cognitiveservices/accounts' || @.supportedResourceType == 'microsoft.machinelearningservices/workspaces' || @.supportedResourceType == 'microsoft.recommendationsservice/accounts' || @.supportedResourceType == 'microsoft.search/searchservices' || @.supportedResourceType == 'microsoft.cache/redis' || @.supportedResourceType == 'microsoft.cache/redisenterprise' || @.supportedResourceType == 'microsoft.classicstorage/storageaccounts' || @.supportedResourceType == 'microsoft.databricks/workspaces' || @.supportedResourceType == 'microsoft.datafactory/factories' || @.supportedResourceType == 'microsoft.dbformariadb/servers' || @.supportedResourceType == 'microsoft.dbformysql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/servergroupsv2' || @.supportedResourceType == 'microsoft.dbforpostgresql/servers' || @.supportedResourceType == 'microsoft.documentdb/databaseaccounts' || @.supportedResourceType == 'microsoft.eventgrid/domains' || @.supportedResourceType == 'microsoft.eventgrid/namespaces' || @.supportedResourceType == 'microsoft.eventgrid/partnernamespaces' || @.supportedResourceType == 'microsoft.eventgrid/topics' || @.supportedResourceType == 'microsoft.eventhub/namespaces' || @.supportedResourceType == 'microsoft.fluidrelay/fluidrelayservers' || @.supportedResourceType == 'microsoft.hdinsight/clusters' || @.supportedResourceType == 'microsoft.healthcareapis/services' || @.supportedResourceType == 'microsoft.healthcareapis/workspaces/fhirservices' || @.supportedResourceType == 'microsoft.kusto/clusters' || @.supportedResourceType == 'microsoft.netapp/netappaccounts/capacitypools/volumes' || @.supportedResourceType == 'microsoft.operationalinsights/workspaces' || @.supportedResourceType == 'microsoft.purview/accounts' || @.supportedResourceType == 'microsoft.relay/namespaces' || @.supportedResourceType == 'microsoft.servicebus/namespaces' || @.supportedResourceType == 'microsoft.sql/managedinstances' || @.supportedResourceType == 'microsoft.sql/servers' || @.supportedResourceType == 'microsoft.sql/servers/databases' || @.supportedResourceType == 'microsoft.sqlvirtualmachine/sqlvirtualmachines' || @.supportedResourceType == 'microsoft.storage/storageaccounts' || @.supportedResourceType == 'microsoft.storagecache/caches' || @.supportedResourceType == 'microsoft.synapse/workspaces/bigdatapools' || @.supportedResourceType == 'microsoft.synapse/workspaces/kustopools' || @.supportedResourceType == 'microsoft.apimanagement/service' || @.supportedResourceType == 'microsoft.cdn/profiles' || @.supportedResourceType == 'microsoft.maps/accounts' || @.supportedResourceType == 'microsoft.network/applicationgateways' || @.supportedResourceType == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' || @.supportedResourceType == 'microsoft.network/loadbalancers' || @.supportedResourceType == 'microsoft.network/networkwatchers/flowlogs' || @.supportedResourceType == 'microsoft.network/publicipaddresses' || @.supportedResourceType == 'microsoft.network/virtualnetworkgateways' || @.supportedResourceType == 'microsoft.aad/domainservices' || @.supportedResourceType == 'microsoft.app/containerapps' || @.supportedResourceType == 'microsoft.appplatform/spring' || @.supportedResourceType == 'microsoft.automation/automationaccounts' || @.supportedResourceType == 'microsoft.avs/privateclouds' || @.supportedResourceType == 'microsoft.batch/batchaccounts' || @.supportedResourceType == 'microsoft.compute/cloudservices' || @.supportedResourceType == 'microsoft.compute/disks' || @.supportedResourceType == 'microsoft.compute/virtualmachines' || @.supportedResourceType == 'microsoft.compute/virtualmachinescalesets' || @.supportedResourceType == 'microsoft.containerregistry/registries' || @.supportedResourceType == 'microsoft.containerservice/managedclusters' || @.supportedResourceType == 'microsoft.hybridcompute/machines' || @.supportedResourceType == 'microsoft.insights/activitylogalerts' || @.supportedResourceType == 'microsoft.insights/components' || @.supportedResourceType == 'microsoft.insights/datacollectionrules' || @.supportedResourceType == 'microsoft.insights/webtests' || @.supportedResourceType == 'microsoft.keyvault/managedhsms' || @.supportedResourceType == 'microsoft.keyvault/vaults' || @.supportedResourceType == 'microsoft.kubernetes/connectedclusters' || @.supportedResourceType == 'microsoft.kubernetesconfiguration/extensions' || @.supportedResourceType == 'microsoft.labservices/labaccounts' || @.supportedResourceType == 'microsoft.labservices/labplans' || @.supportedResourceType == 'microsoft.labservices/labs' || @.supportedResourceType == 'microsoft.monitor/accounts' || @.supportedResourceType == 'microsoft.operationsmanagement/solutions' || @.supportedResourceType == 'microsoft.recoveryservices/vaults' || @.supportedResourceType == 'microsoft.servicefabric/clusters' || @.supportedResourceType == 'microsoft.subscriptions/subscriptions' || @.supportedResourceType == 'microsoft.web/sites' || @.supportedResourceType == 'microsoft.web/staticsites')]\",\"columns\":[{\"path\":\"id\",\"columnid\":\"Id\",\"columnType\":\"string\"},{\"path\":\"resourceMetadata.singular\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"displayName\",\"columnid\":\"Retirement\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementFeatureName\",\"columnid\":\"Feature\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementDate\",\"columnid\":\"Retirement date\",\"columnType\":\"datetime\"},{\"path\":\"supportedResourceType\",\"columnid\":\"Resource type\",\"columnType\":\"string\"},{\"path\":\"learnMoreLink\",\"columnid\":\"Learn more\",\"columnType\":\"string\"}]}}]}",
@@ -985,18 +1026,18 @@
                 "filter": true
               }
             },
+            "name": "AdvisorRetirementMetadataRaw",
+            "type": 3,
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
-            },
-            "type": 3
+            }
           },
           {
-            "name": "AdvisorRetirementResourceCounts",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0\n| order by ['# Resources'] desc",
               "size": 2,
               "title": "Advisor affected-resource counts (raw)",
               "queryType": 1,
@@ -1010,22 +1051,31 @@
                 "filter": true
               }
             },
+            "name": "AdvisorRetirementResourceCounts",
+            "type": 3,
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
-            },
-            "type": 3
+            }
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"7d1e2e84-68d6-45e5-94ee-04ef8d1f8080\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"e08f1384-cd00-453c-b576-f114eafb233c\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
               "size": 2,
               "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
               "queryType": 7,
               "showExportToExcel": true,
+              "exportedParameters": [
+                {
+                  "fieldName": "ServiceID",
+                  "parameterName": "SelectedRetirementServiceId",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ],
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1100,25 +1150,16 @@
                 ],
                 "sortBy": [
                   {
-                    "itemKey": "Retirement date",
-                    "sortOrder": 1
+                    "itemKey": "# Resources",
+                    "sortOrder": 2
                   }
                 ]
               },
-              "noDataMessage": "No Advisor retirement metadata matched the selected domains.",
-              "exportedParameters": [
-                {
-                  "fieldName": "ServiceID",
-                  "parameterName": "SelectedRetirementServiceId",
-                  "parameterType": 1,
-                  "defaultValue": ""
-                }
-              ]
+              "noDataMessage": "No Advisor retirement metadata matched the selected domains."
             },
             "name": "AdvisorRetirementSummary"
           },
           {
-            "name": "AdvisorRetirementAffectedResources",
             "content": {
               "version": "KqlItem/1.0",
               "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedRetirementServiceId}'\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | project\n        ResourceId = tolower(id),\n        Resource = name,\n        Subscription,\n        ['Resource group'] = resourceGroup,\n        Location = location,\n        ['Resource type'] = type,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Subscription,\n    ['Resource group'],\n    ['Resource type'],\n    Location,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Subscription, ['Resource group'], ['Resource type'], Location, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
@@ -1130,6 +1171,7 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
+              "noDataMessage": "No affected resources were found for the selected retirement in the current scope.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1146,17 +1188,17 @@
                     }
                   }
                 ]
-              },
-              "noDataMessage": "No affected resources were found for the selected retirement in the current scope."
+              }
             },
+            "name": "AdvisorRetirementAffectedResources",
+            "type": 3,
             "conditionalVisibilities": [
               {
                 "parameterName": "SelectedRetirementServiceId",
                 "comparison": "isNotEqualTo",
                 "value": ""
               }
-            ],
-            "type": 3
+            ]
           }
         ]
       },
