@@ -297,7 +297,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| project\n    Resource,\n    Type = ResourceKind,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = Location,\n    ['VM size'] = VmSize,\n    Series,\n    ['Instances'] = InstanceCount,\n    ['Growth at risk'] = GrowthGap,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, ['Growth at risk'] desc, Resource asc\n| project-away RiskRank",
+              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| project\n    Resource,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    Type = ResourceKind,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = Location,\n    ['VM size'] = VmSize,\n    Series,\n    ['Instances'] = InstanceCount,\n    ['Growth at risk'] = GrowthGap,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ResourceId,\n    RiskRank\n| order by ['Instances'] desc, RiskRank asc, ['Growth at risk'] desc, Resource asc\n| project-away RiskRank",
               "size": 2,
               "title": "All impacted VMs and scale sets",
               "queryType": 1,
@@ -424,6 +424,12 @@
                       "customColumnWidthSetting": "32ch"
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Instances",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -455,7 +461,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| where ResourceKind == 'VM'\n| project\n    VM = name,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zone = Zones,\n    ['Current size'] = VmSize,\n    Series,\n    Category,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Operating system'] = OperatingSystem,\n    Priority,\n    ['Availability set'] = AvailabilitySet,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, VM asc\n| project-away RiskRank",
+              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| where ResourceKind == 'VM'\n| project\n    VM = name,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zone = Zones,\n    ['Current size'] = VmSize,\n    Series,\n    Category,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Operating system'] = OperatingSystem,\n    Priority,\n    ['Availability set'] = AvailabilitySet,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, VM asc\n| project-away RiskRank",
               "size": 3,
               "title": "Impacted virtual machines",
               "queryType": 1,
@@ -614,7 +620,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| where ResourceKind == 'VMSS'\n| project\n    ['Scale set'] = name,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zones,\n    ['Current size'] = VmSize,\n    Series,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    ['Current capacity'] = CurrentCapacity,\n    ['Autoscale minimum'] = AutoscaleMin,\n    ['Autoscale maximum'] = AutoscaleMax,\n    ['Growth at risk'] = GrowthGap,\n    ['Orchestration mode'] = OrchestrationMode,\n    ['Upgrade mode'] = UpgradeMode,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by RiskRank asc, ['Growth at risk'] desc, ['Scale set'] asc\n| project-away RiskRank",
+              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| where ResourceKind == 'VMSS'\n| project\n    ['Scale set'] = name,\n    Risk,\n    ['Capacity / lifecycle'] = LifecycleStatus,\n    Subscription,\n    ['Resource group'] = ResourceGroup,\n    Region = location,\n    Zones,\n    ['Current size'] = VmSize,\n    Series,\n    ['Current capacity'] = CurrentCapacity,\n    ['Autoscale minimum'] = AutoscaleMin,\n    ['Autoscale maximum'] = AutoscaleMax,\n    ['Growth at risk'] = GrowthGap,\n    ['Orchestration mode'] = OrchestrationMode,\n    ['Upgrade mode'] = UpgradeMode,\n    ['Retirement date'] = RetirementDate,\n    ['Target family guidance'] = RecommendedTarget,\n    ['Migration considerations'] = MigrationConsiderations,\n    ResourceId,\n    RiskRank\n| order by ['Current capacity'] desc, RiskRank asc, ['Growth at risk'] desc, ['Scale set'] asc\n| project-away RiskRank",
               "size": 3,
               "title": "Impacted VM scale sets",
               "queryType": 1,
@@ -741,6 +747,12 @@
                       "customColumnWidthSetting": "32ch"
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Current capacity",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -772,7 +784,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Regions = dcount(Location),\n    RiskRank = min(RiskRank)\n  by Series, Category, ['Capacity / lifecycle'] = LifecycleStatus, ['Retirement date'] = RetirementDate, ['Target family guidance'] = RecommendedTarget, Risk\n| order by RiskRank asc, ['Growth at risk'] desc, Instances desc\n| project-away RiskRank",
+              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Regions = dcount(Location),\n    RiskRank = min(RiskRank)\n  by Series, Category, ['Capacity / lifecycle'] = LifecycleStatus, ['Retirement date'] = RetirementDate, ['Target family guidance'] = RecommendedTarget, Risk\n| project\n    Series,\n    Risk,\n    ['Capacity / lifecycle'],\n    Category,\n    Resources,\n    Instances,\n    ['Growth at risk'],\n    Regions,\n    ['Retirement date'],\n    ['Target family guidance'],\n    RiskRank\n| order by Resources desc, Instances desc, RiskRank asc, ['Growth at risk'] desc\n| project-away RiskRank",
               "size": 2,
               "title": "Migration plan by VM series",
               "queryType": 1,
@@ -888,6 +900,12 @@
                       "formatName": "shortDatePattern"
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Resources",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -897,7 +915,7 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Series = strcat_array(make_set(Series, 20), ', ')\n  by Subscription, Region = Location\n| order by ['Growth at risk'] desc, Instances desc",
+              "query": "{ComputeInventoryQuery}\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n| summarize\n    Resources = count(),\n    Instances = sum(InstanceCount),\n    ['Growth at risk'] = sum(GrowthGap),\n    Series = strcat_array(make_set(Series, 20), ', ')\n  by Subscription, Region = Location\n| order by Resources desc, Instances desc, ['Growth at risk'] desc",
               "size": 2,
               "title": "Regional migration concentration",
               "queryType": 1,
@@ -944,6 +962,12 @@
                       "emptyValCustomText": "0"
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Resources",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
@@ -973,7 +997,11 @@
             "name": "vmRetirementHeader"
           },
           {
-            "type": 3,
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
             "content": {
               "version": "KqlItem/1.0",
               "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"providers/Microsoft.Advisor/metadata\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2025-01-01\"},{\"key\":\"$filter\",\"value\":\"recommendationSubCategory eq 'ServiceUpgradeAndRetirement' and retirementDate ge '2024-01-01'\"},{\"key\":\"$expand\",\"value\":\"ibiza\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].properties.supportedValues[?(@.supportedResourceType == 'microsoft.compute/virtualmachines' || @.supportedResourceType == 'microsoft.compute/virtualmachinescalesets')]\",\"columns\":[{\"path\":\"id\",\"columnid\":\"Id\",\"columnType\":\"string\"},{\"path\":\"resourceMetadata.singular\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"displayName\",\"columnid\":\"Retirement\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementFeatureName\",\"columnid\":\"SKU / feature\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementDate\",\"columnid\":\"Retirement date\",\"columnType\":\"datetime\"},{\"path\":\"supportedResourceType\",\"columnid\":\"Resource type\",\"columnType\":\"string\"},{\"path\":\"learnMoreLink\",\"columnid\":\"Learn more\",\"columnType\":\"string\"}]}}]}",
@@ -986,18 +1014,18 @@
                 "filter": true
               }
             },
+            "name": "VmRetirementMetadataRaw",
+            "type": 3
+          },
+          {
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
             },
-            "name": "VmRetirementMetadataRaw"
-          },
-          {
-            "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0\n| order by ['# Resources'] desc",
               "size": 2,
               "title": "VM retirement affected-resource counts (raw)",
               "queryType": 1,
@@ -1011,23 +1039,18 @@
                 "filter": true
               }
             },
-            "conditionalVisibility": {
-              "parameterName": "selectedTab",
-              "comparison": "isEqualTo",
-              "value": "__internal_never_matches__"
-            },
-            "name": "VmRetirementResourceCounts"
+            "name": "VmRetirementResourceCounts",
+            "type": 3
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\",\"mergeType\":\"leftouter\",\"leftTable\":\"VmRetirementMetadataRaw\",\"rightTable\":\"VmRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[VmRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].SKU / feature\",\"mergedName\":\"SKU / feature\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"232de2a5-ba8c-43e9-ac86-f416cba742fc\"},{\"originalName\":\"[VmRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\",\"mergeType\":\"leftouter\",\"leftTable\":\"VmRetirementMetadataRaw\",\"rightTable\":\"VmRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[VmRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].SKU / feature\",\"mergedName\":\"SKU / feature\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"27cc4f77-4069-424e-b9a5-a831adf6a919\"},{\"originalName\":\"[VmRetirementResourceCounts].ServiceID\"}]}",
               "size": 3,
               "title": "VM and VMSS SKU retirements (past and upcoming)",
               "queryType": 7,
               "showExportToExcel": true,
-              "noDataMessage": "No VM or VMSS retirement metadata was returned.",
               "exportedParameters": [
                 {
                   "fieldName": "ServiceID",
@@ -1036,6 +1059,7 @@
                   "defaultValue": ""
                 }
               ],
+              "noDataMessage": "No VM or VMSS retirement metadata was returned.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1110,8 +1134,8 @@
                 ],
                 "sortBy": [
                   {
-                    "itemKey": "Retirement date",
-                    "sortOrder": 1
+                    "itemKey": "# Resources",
+                    "sortOrder": 2
                   }
                 ]
               }
@@ -1119,10 +1143,9 @@
             "name": "VmRetirementSummary"
           },
           {
-            "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedVmRetirementServiceId}'\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | extend\n        ResourceId = tolower(id),\n        ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n        VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n        Capacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0))\n    | project\n        ResourceId,\n        Resource = name,\n        Type = ResourceKind,\n        ['Current size'] = VmSize,\n        Capacity,\n        Subscription,\n        ['Resource group'] = resourceGroup,\n        Region = location,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Subscription,\n    ['Resource group'],\n    Type,\n    ['Current size'],\n    Capacity,\n    Region,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Subscription, ['Resource group'], Type, ['Current size'], Capacity, Region, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
+              "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedVmRetirementServiceId}'\n| join kind=inner (\n    resources\n    | where type =~ 'microsoft.compute/virtualmachines'\n        or type =~ 'microsoft.compute/virtualmachinescalesets'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | extend _regions = dynamic([{Regions}])\n| where array_length(_regions) == 0 or set_has_element(_regions, '*') or set_has_element(_regions, location)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | extend\n        ResourceId = tolower(id),\n        ResourceKind = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', 'VMSS'),\n        VmSize = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name)),\n        Capacity = iff(type =~ 'microsoft.compute/virtualmachines', 1, coalesce(toint(sku.capacity), 0))\n    | project\n        ResourceId,\n        Resource = name,\n        Type = ResourceKind,\n        ['Current size'] = VmSize,\n        Capacity,\n        Subscription,\n        ['Resource group'] = resourceGroup,\n        Region = location,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Subscription,\n    ['Resource group'],\n    Type,\n    ['Current size'],\n    Capacity,\n    Region,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Subscription, ['Resource group'], Type, ['Current size'], Capacity, Region, ['Recommendation state'], ResourceId, Tags\n| order by Capacity desc, Resource asc",
               "size": 3,
               "title": "Based on the above table, this list shows VM or VMSS resources affected by the selected retirement.",
               "queryType": 1,
@@ -1147,9 +1170,16 @@
                       "customColumnWidthSetting": "32ch"
                     }
                   }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Capacity",
+                    "sortOrder": 2
+                  }
                 ]
               }
             },
+            "name": "VmRetirementAffectedResources",
             "conditionalVisibilities": [
               {
                 "parameterName": "SelectedVmRetirementServiceId",
@@ -1157,7 +1187,7 @@
                 "value": ""
               }
             ],
-            "name": "VmRetirementAffectedResources"
+            "type": 3
           }
         ]
       },
