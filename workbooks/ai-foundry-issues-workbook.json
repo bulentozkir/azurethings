@@ -486,20 +486,20 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
-              "exportFieldName": "ResourceId",
               "exportDefaultValue": "",
-              "exportParameterName": "ModelAccounts",
+              "exportFieldName": "ResourceId",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
-              }
+              },
+              "exportParameterName": "ModelAccounts"
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
           },
           {
             "type": 1,
             "content": {
-              "json": "### Deployments for the selected account\r\n\r\n* **Version upgrade policy** - `NoAutoUpgrade` means the deployment will **not**\r\n  move off a retiring model version on its own. Those are your migration risks.\r\n  `OnceCurrentVersionExpired` auto-upgrades only at expiry;\r\n  `OnceNewDefaultVersionAvailable` tracks the current default.\r\n* **Content filter** - a deployment with no RAI policy is unfiltered.\r\n* **SKU** - `Standard` / `GlobalStandard` are pay-as-you-go; `ProvisionedManaged` is reserved capacity.\r\n\r\nThis grid is the authoritative response from the selected account's\r\n`/deployments` endpoint: **one row per actual deployment**. It deliberately does not\r\nmerge the model catalog into this table. Azure Workbooks supports only one join key,\r\nand composite JSONPath keys can evaluate empty in some portal runtimes, producing a\r\ncross join where every deployment is repeated for every catalog model.\r\n\r\nUse **Model retirement** for the live regional lifecycle calendar. Match the\r\ndeployment's model and version to the corresponding catalog row.\r\n\r\n**Two things to expect:**\r\n\r\n* An empty grid means the selected account has no model deployments. This is normal\r\n  for AI Services accounts used for Document Intelligence, Speech, or Vision.\r\n* **Tick exactly one account.** Azure Workbooks send an ARM query to **one Azure\r\n  resource path at a time** - `GET` and `GETARRAY` were both tested and each joins\r\n  multiple selected values into a single malformed path, and there is no\r\n  subscription-wide deployments API. Selecting several accounts will error."
+              "json": "### Deployments for the selected account\r\n\r\n* **Version upgrade policy** - `NoAutoUpgrade` means the deployment will **not**\r\n  move off a retiring model version on its own. Those are your migration risks.\r\n  `OnceCurrentVersionExpired` auto-upgrades only at expiry;\r\n  `OnceNewDefaultVersionAvailable` tracks the current default.\r\n* **Content filter** - a deployment with no RAI policy is unfiltered.\r\n* **SKU** - `Standard` / `GlobalStandard` are pay-as-you-go; `ProvisionedManaged` is reserved capacity.\r\n\r\nThis grid is the authoritative response from the selected account's\r\n`/deployments` endpoint: **one row per actual deployment**. It deliberately does not\r\nmerge the model catalog into this table. Azure Workbooks supports only one join key,\r\nand composite JSONPath keys can evaluate empty in some portal runtimes, producing a\r\ncross join where every deployment is repeated for every catalog model.\r\n\r\nSelect one deployment row to load its exact lifecycle and retirement dates below.\r\nThis is a one-row regional catalog lookup on `Format.Model.Version`, not a merge, so\r\nit cannot duplicate deployment rows. Use **Model retirement** for the full calendar.\r\n\r\n**Two things to expect:**\r\n\r\n* An empty grid means the selected account has no model deployments. This is normal\r\n  for AI Services accounts used for Document Intelligence, Speech, or Vision.\r\n* **Tick exactly one account.** Azure Workbooks send an ARM query to **one Azure\r\n  resource path at a time** - `GET` and `GETARRAY` were both tested and each joins\r\n  multiple selected values into a single malformed path, and there is no\r\n  subscription-wide deployments API. Selecting several accounts will error."
             },
             "name": "mdWhat"
           },
@@ -512,6 +512,38 @@
               "title": "Model deployments",
               "queryType": 12,
               "showExportToExcel": true,
+              "exportedParameters": [
+                {
+                  "fieldName": "Deployment",
+                  "parameterName": "SelectedDeploymentName",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                },
+                {
+                  "fieldName": "Format",
+                  "parameterName": "SelectedDeploymentFormat",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                },
+                {
+                  "fieldName": "Model",
+                  "parameterName": "SelectedDeploymentModel",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                },
+                {
+                  "fieldName": "Version",
+                  "parameterName": "SelectedDeploymentVersion",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                },
+                {
+                  "fieldName": "SKU",
+                  "parameterName": "SelectedDeploymentSku",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ],
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -524,6 +556,85 @@
               }
             },
             "name": "ModelDeployments"
+          },
+          {
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"subscriptions/{AccountSubscription}/providers/Microsoft.CognitiveServices/locations/{AccountRegion}/models\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[?(@.kind == '{AccountKind}' && @.name == '{SelectedDeploymentFormat}.{SelectedDeploymentModel}.{SelectedDeploymentVersion}')]\",\"columns\":[{\"path\":\"name\",\"columnid\":\"Deployment\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentName}\"},{\"path\":\"model.name\",\"columnid\":\"Model\",\"columnType\":\"string\"},{\"path\":\"model.version\",\"columnid\":\"Version\",\"columnType\":\"string\"},{\"path\":\"model.format\",\"columnid\":\"Format\",\"columnType\":\"string\"},{\"path\":\"name\",\"columnid\":\"SKU\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentSku}\"},{\"path\":\"model.lifecycleStatus\",\"columnid\":\"Lifecycle\",\"columnType\":\"string\"},{\"path\":\"model.deprecation.inference\",\"columnid\":\"Inference retirement\",\"columnType\":\"datetime\"},{\"path\":\"model.deprecation.fineTune\",\"columnid\":\"Fine-tune retirement\",\"columnType\":\"datetime\"}]}}]}",
+              "size": 1,
+              "title": "Retirement details for the selected deployment",
+              "queryType": 12,
+              "showExportToExcel": true,
+              "noDataMessage": "No exact regional catalog row was found for the selected deployment.",
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Lifecycle",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "is Empty",
+                          "representation": "red",
+                          "text": "Not in catalog (retired/legacy)"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Deprecating",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Deprecated",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "Preview",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "==",
+                          "thresholdValue": "GenerallyAvailable",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "SelectedDeploymentRetirement",
+            "type": 3,
+            "conditionalVisibilities": [
+              {
+                "parameterName": "SelectedDeploymentFormat",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              },
+              {
+                "parameterName": "SelectedDeploymentModel",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              },
+              {
+                "parameterName": "SelectedDeploymentVersion",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              }
+            ]
           }
         ]
       },
@@ -1026,13 +1137,13 @@
                 "filter": true
               }
             },
-            "name": "AdvisorRetirementMetadataRaw",
-            "type": 3,
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
-            }
+            },
+            "name": "AdvisorRetirementMetadataRaw",
+            "type": 3
           },
           {
             "content": {
@@ -1051,19 +1162,19 @@
                 "filter": true
               }
             },
-            "name": "AdvisorRetirementResourceCounts",
-            "type": 3,
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
-            }
+            },
+            "name": "AdvisorRetirementResourceCounts",
+            "type": 3
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"e08f1384-cd00-453c-b576-f114eafb233c\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"e08f1384-cd00-453c-b576-f114eafb233c\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
               "size": 2,
               "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
               "queryType": 7,
