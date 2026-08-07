@@ -8,7 +8,7 @@
 
 ## What is this?
 
-This pack contains 20 reusable `SKILL.md` runbooks for Azure SRE Agent. The skills combine:
+This pack contains 21 reusable `SKILL.md` runbooks for Azure SRE Agent. The skills combine:
 
 - Official Microsoft Learn guidance
 - Azure Well-Architected Framework recommendations
@@ -43,6 +43,7 @@ The skills are read-only by default. They gather evidence, correlate findings, s
 | 18 | [Azure Governance and Compliance](18-Govenance-Compliance/SKILL.md) | Management hierarchy, Policy, RBAC, tags, locks, ownership, orphan lifecycle | Governance maturity and remediation plan |
 | 19 | [Azure Service Retirements](19-Azure-Service-Retirements/SKILL.md) | Service Health signals, Advisor impact, deadlines, migration and verification | Retirement action register |
 | 20 | [Java App Troubleshooting](20-java-app-troubleshooting/SKILL.md) | AppLens, Application Insights APM, JVM, GC, threads, memory, dependencies | Ranked Java root-cause analysis |
+| 21 | [Azure Front Door Security Troubleshooting](21-FrontDoor-Security-Troubleshooting/SKILL.md) | Front Door WAF, access, health-probe, bot, abuse, origin, and Workbook v3 evidence | Ranked security and origin diagnosis |
 
 Each skill includes:
 
@@ -116,6 +117,7 @@ Diagnose ImagePullBackOff from AKS to ACR.
 Troubleshoot the failing Container Apps revision.
 Why are Java request p99 and Hikari pending connections increasing?
 Assess our Azure OpenAI model retirement and quota exposure.
+Investigate Front Door WAF blocks, bot activity, and origin health failures.
 ```
 
 Azure SRE Agent uses the skill name and description to activate the most relevant runbook.

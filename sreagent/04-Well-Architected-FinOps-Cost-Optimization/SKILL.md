@@ -3,9 +3,9 @@ name: finops-cost-optimization
 description: >
   Assess and prioritize Azure cost optimization opportunities using the FinOps
   Toolkit optimization workbook model and FinOps Hubs FOCUS data. Use for rate
-  optimization, usage optimization, Advisor recommendations, commitments,
-  Azure Hybrid Benefit, idle resources, rightsizing, waste reduction, and
-  evidence-based savings plans across Azure scopes.
+  optimization, usage optimization, Advisor recommendations, daily reservation
+  and savings-plan utilization, cost anomalies, Azure Hybrid Benefit, idle
+  resources, rightsizing, waste reduction, and evidence-based savings plans.
 tools:
   - RunAzCliReadCommands
   - execute_kusto_query
@@ -32,6 +32,7 @@ requirements, and implementation results.
 - The user asks how to reduce or optimize Azure cost
 - The user asks for FinOps Hubs or optimization workbook analysis
 - The user wants Advisor, reservation, savings plan, or Hybrid Benefit review
+- The user wants last-day commitment utilization or cost spike/dip detection
 - The user wants idle resource, rightsizing, or waste identification
 - The user wants a monthly cost optimization review or backlog
 - The user needs validated savings estimates and implementation priorities
@@ -79,9 +80,9 @@ Collect or infer:
 | Licensing | Software Assurance and Hybrid Benefit eligibility |
 | Ownership | Workload owner, finance owner, and approver |
 
-Use complete billing periods for trends and commitment decisions. Use 7, 30,
-and 60-day lookback windows when comparing reservation and savings plan
-recommendations, as supported by the optimization workbook.
+Use the latest fully ingested completed UTC day for daily controls and the prior
+60 complete days for anomaly context. Use complete billing periods for trends
+and 7, 30, and 60-day lookbacks for commitment purchase recommendations.
 
 ## Assessment procedure
 
@@ -169,6 +170,43 @@ Break down cost by workload tags only when tag quality is sufficient. Track
 untagged cost separately; do not infer ownership from a resource name unless
 the user confirms the naming convention.
 
+### Step 2.1: Run last-day critical controls
+Use the latest fully ingested completed UTC usage date (`D`), never a partial
+current day. Report source freshness and scope coverage. Missing or pending data
+is **Unknown**, not zero utilization, zero cost, or a healthy result.
+
+#### Reservation utilization gate
+Query daily Reservation Summaries and Reservation Details for `D`.
+- If `AvgUtilizationPercentage < 100.0` or `UsedHours < ReservedHours`, classify
+  **Critical - unutilized reservation**. Do not average it away or downgrade it.
+- Report reservation/order IDs, display name, SKU, scope, region, quantity,
+  used/reserved hours, utilization, unused quantity, and affected resources.
+- Show 7-day and 30-day context and recheck after refresh because last-day data
+  can change. Evaluate prepurchase plans against their term balance separately.
+
+#### Savings plan utilization gate
+Query Benefit Utilization Summaries at daily grain for `D`.
+- If daily `AvgUtilizationPercentage < 100.0`, classify
+  **Critical - unutilized savings plan**. Do not average it away or downgrade it.
+- Report benefit/order IDs, display name, scope, hourly commitment and currency,
+  average/minimum/maximum utilization, unused commitment, and covered resources.
+- Treat a new plan with no data for up to 48 hours, or a normal 2-24 hour refresh
+  delay, as **Data pending** and recheck; never infer 0% utilization.
+
+#### Resource-group cost spike and dip detection
+Run native Cost Management subscription anomaly insights first; they compare a
+day with a forecast based on the prior 60 days and can take 36 hours after UTC
+day-end. Also calculate daily `EffectiveCost` by resource group and currency.
+- Flag as **Critical** when native detection identifies a positive/negative anomaly, or
+  when a 60-day robust z-score is at least 3.5, absolute change is at least 50%,
+  and the change exceeds the approved currency-specific materiality floor.
+- Treat material new cost from zero and removed cost to zero as candidates.
+- For each flagged group, compare `D` with each resource's 60-day median. Report
+  resource ID/name/type, service, meter, latest cost, baseline, delta, delta
+  percentage, and share of the resource-group delta, ranked by absolute impact.
+- Correlate Resource Graph and Activity Log changes. A cost dip can indicate an
+  outage, deletion, missing ingestion, or benefit reassignment, not savings.
+
 ### Step 3: Build the current recommendation inventory
 FinOps Hubs combines Cost Management reservation recommendations, Azure Advisor
 cost recommendations, and custom Resource Graph recommendations.
@@ -255,9 +293,10 @@ flexibility across eligible resource types, SKUs, and regions. Compare with
 reservation economics; do not count the same usage in both opportunities.
 
 #### 4.5 Existing commitment utilization
-Use `CommitmentDiscountUsage()` and the FinOps Hubs rate optimization report to
-identify underutilized commitments. Keep quantities and units separate and
-validate portal utilization before proposing scope or renewal changes.
+Use the Step 2.1 daily gates as the source of record, then use
+`CommitmentDiscountUsage()` and the FinOps Hubs report for cost attribution.
+Keep quantities and units separate and validate refreshed utilization before
+proposing scope, exchange, return, or renewal actions.
 
 ### Step 5: Usage optimization
 Validate workload need and utilization before recommending any change.
@@ -350,6 +389,8 @@ Calculate an Azure Cost Optimization maturity score:
 | 0-39 | Initial |
 
 Missing data earns zero points; it is not evidence of optimization.
+Any confirmed reservation or savings-plan utilization below 100% must appear as
+**Critical** in the executive summary regardless of the maturity score.
 
 ## Accepted exceptions
 If the user provides approved exceptions, exclude them from actionable savings
@@ -377,6 +418,7 @@ Expired or out-of-scope exceptions must be investigated normally.
 | Billing currency | Currency |
 | Cost basis | Effective / Billed |
 | FinOps Hubs freshness | Last cost and recommendation ingestion |
+| Latest daily control date | Latest complete utilization and cost date |
 | Baseline monthly cost | Amount |
 | Gross source savings | Amount/year |
 | Validated non-overlapping savings | Amount/year and percentage |
@@ -385,13 +427,13 @@ Expired or out-of-scope exceptions must be investigated normally.
 Required sections:
 1. **Executive summary**
 2. **Data quality and assumptions**
-3. **Cost baseline and top drivers**
-4. **Rate optimization** - Hybrid Benefit, reservations, savings plans
-5. **Usage optimization** - compute, storage, networking, and services
-6. **Deduplicated savings summary**
-7. **Prioritized backlog** - quick wins, plan next, investigate
-8. **Implementation sequence**
-9. **Verification and realized-savings plan**
+3. **Last-day critical controls** - reservations, savings plans, cost anomalies
+4. **Cost baseline and top drivers**
+5. **Rate optimization** - Hybrid Benefit, reservations, savings plans
+6. **Usage optimization** - compute, storage, networking, and services
+7. **Deduplicated savings summary**
+8. **Prioritized backlog** - quick wins, plan next, investigate
+9. **Implementation sequence and verification**
 10. **Accepted exceptions**
 11. **Commands and queries used**
 12. **References**
@@ -399,6 +441,8 @@ Required sections:
 Every recommendation row must include source, resource/scope, current cost,
 savings period, estimated savings, confidence, overlap group, risk, owner,
 next action, and verification method.
+Daily-control rows must also include source date, utilization or baseline,
+absolute/percentage delta, severity, freshness, and contributing resources.
 
 ## Remediation guidance
 - Suggest changes only; never execute them from this skill.
@@ -420,6 +464,10 @@ next action, and verification method.
 - Calculate Advisor savings: https://learn.microsoft.com/azure/advisor/advisor-how-to-calculate-total-cost-savings
 - Advisor cost recommendations: https://learn.microsoft.com/azure/advisor/advisor-reference-cost-recommendations
 - FOCUS overview: https://learn.microsoft.com/cloud-computing/finops/focus/what-is-focus
+- Reservation utilization: https://learn.microsoft.com/azure/cost-management-billing/reservations/reservation-utilization
+- Savings plan utilization: https://learn.microsoft.com/azure/cost-management-billing/savings-plan/view-utilization
+- Cost anomaly investigation: https://learn.microsoft.com/azure/cost-management-billing/understand/analyze-unexpected-charges
+- Cost Management automation APIs: https://learn.microsoft.com/azure/cost-management-billing/manage/cost-management-automation-scenarios
 
 ## Sample output
 
@@ -439,27 +487,13 @@ next action, and verification method.
 | Validated non-overlapping savings | $438,000/year (8.7%) |
 | Maturity score | 74/100 - Managed |
 
-### Rate optimization
+### Last-day critical controls
 
-| Opportunity | Savings/year | Confidence | Decision |
-|-------------|--------------|------------|----------|
-| SQL Hybrid Benefit | $96,000 | Medium | Confirm Software Assurance |
-| VM reservations | $180,000 | Medium | Recalculate after rightsizing |
-| Savings plan residual | $72,000 | Low | Mutually exclusive with part of VM RI |
+| Control | Latest complete day | Finding | Severity |
+|---------|---------------------|---------|----------|
+| VM reservation | 2026-08-04 | 92.4%; 1.8 of 24 reserved hours unused | Critical |
+| Compute savings plan | 2026-08-04 | 97.1%; $14.50 commitment unused | Critical |
+| `rg-orders-prod` anomaly | 2026-08-04 | +68%; VM scale set and egress drove 91% of delta | Critical |
 
-### Usage optimization
-
-| Opportunity | Savings/year | Confidence | Decision |
-|-------------|--------------|------------|----------|
-| Deallocate 14 stopped VMs | $84,000 | High | Quick win after owner approval |
-| Remove 31 unattached disks | $18,000 | High | Excludes ASR and legal-hold disks |
-| Rightsize 9 VMs | $60,000 | Medium | Validate memory and seasonal peaks |
-
-### Implementation sequence
-1. Apply approved waste removal and rightsizing.
-2. Wait for refreshed commitment recommendations.
-3. Purchase validated reservations.
-4. Apply savings plan only to uncovered eligible spend.
-
-**Excluded overlap:** $252,000/year of reservation and savings plan estimates
-targeted the same pre-rightsizing usage and was removed from validated savings.
+**Next action:** Investigate these critical controls before resource changes or
+new commitment purchases; keep overlapping savings estimates excluded.
