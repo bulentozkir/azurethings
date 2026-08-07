@@ -8,7 +8,7 @@
 
 ## What is this?
 
-This pack contains 21 reusable `SKILL.md` runbooks for Azure SRE Agent. The skills combine:
+This pack contains 23 reusable `SKILL.md` runbooks for Azure SRE Agent. The skills combine:
 
 - Official Microsoft Learn guidance
 - Azure Well-Architected Framework recommendations
@@ -44,6 +44,8 @@ The skills are read-only by default. They gather evidence, correlate findings, s
 | 19 | [Azure Service Retirements](19-Azure-Service-Retirements/SKILL.md) | Service Health signals, Advisor impact, deadlines, migration and verification | Retirement action register |
 | 20 | [Java App Troubleshooting](20-java-app-troubleshooting/SKILL.md) | AppLens, Application Insights APM, JVM, GC, threads, memory, dependencies | Ranked Java root-cause analysis |
 | 21 | [Azure Front Door Security Troubleshooting](21-FrontDoor-Security-Troubleshooting/SKILL.md) | Front Door WAF, access, health-probe, bot, abuse, origin, and Workbook v3 evidence | Ranked security and origin diagnosis |
+| 22 | [Application Gateway Security Troubleshooting](22-Application-Gateway-Security-Troubleshooting/SKILL.md) | App Gateway/AGC WAF, dedicated logs, backend, TLS, routing, capacity, workbook evidence | Ranked WAF and gateway diagnosis |
+| 23 | [Azure Firewall Security Troubleshooting](23-Firewall-Security-Troubleshooting/SKILL.md) | Firewall rules, TI, IDPS, TLS, DNS, SNAT, flows, policy, health, repository evidence | Ranked firewall security diagnosis |
 
 Each skill includes:
 
@@ -118,6 +120,8 @@ Troubleshoot the failing Container Apps revision.
 Why are Java request p99 and Hikari pending connections increasing?
 Assess our Azure OpenAI model retirement and quota exposure.
 Investigate Front Door WAF blocks, bot activity, and origin health failures.
+Diagnose Application Gateway WAF blocks and unhealthy backends.
+Investigate Azure Firewall IDPS alerts, denies, DNS, and SNAT exhaustion.
 ```
 
 Azure SRE Agent uses the skill name and description to activate the most relevant runbook.
