@@ -289,9 +289,9 @@ region, operation, stream type, and status code:
 - `TimeToResponse`
 - `NormalizedTimeBetweenTokens`
 - `InputTokens`, `OutputTokens`, and `TotalTokens`
-- `TokensCacheMatchRate`
+- `AzureOpenAIContextTokensCacheMatchRate`
 - `ProvisionedUtilization`
-- `ProvisionedConsumedTokens`
+- `AzureOpenAIProvisionedManagedUtilizationV2`
 
 Inspect diagnostic routing:
 
@@ -299,9 +299,9 @@ Inspect diagnostic routing:
 az monitor diagnostic-settings list --resource <foundry-resource-id> -o json
 ```
 
-Validate required categories such as Audit, RequestResponse, Azure OpenAI usage,
-and AllMetrics. Log ingestion can be delayed; don't declare a gap immediately
-after configuration.
+Validate required categories such as Audit Logs, Request and Response Logs,
+Azure OpenAI Request Usage, Trace Logs, and AllMetrics. Log ingestion can be
+delayed; don't declare a gap immediately after configuration.
 
 Use metadata-only latency and error analysis:
 

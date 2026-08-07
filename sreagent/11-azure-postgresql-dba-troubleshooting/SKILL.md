@@ -124,7 +124,8 @@ query and avoid SQL text unless explicitly authorized.
 ```sql
 SELECT datname, state, wait_event_type, wait_event,
        count(*) AS sessions,
-       max(EXTRACT(EPOCH FROM (clock_timestamp() - query_start))) AS max_query_seconds,
+       max(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)))
+         FILTER (WHERE state = 'active') AS max_active_query_seconds,
        max(EXTRACT(EPOCH FROM (clock_timestamp() - xact_start))) AS max_xact_seconds
 FROM pg_stat_activity
 WHERE pid <> pg_backend_pid()
@@ -151,12 +152,12 @@ SELECT blocked.pid AS blocked_pid,
        blocker.pid AS blocker_pid,
        blocked.wait_event_type,
        blocked.wait_event,
-       EXTRACT(EPOCH FROM (clock_timestamp() - blocked.query_start)) AS blocked_seconds,
+       EXTRACT(EPOCH FROM (clock_timestamp() - blocked.query_start)) AS blocked_query_age_seconds,
        EXTRACT(EPOCH FROM (clock_timestamp() - blocker.xact_start)) AS blocker_xact_seconds
 FROM pg_stat_activity blocked
 JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS b(pid) ON true
 JOIN pg_stat_activity blocker ON blocker.pid = b.pid
-ORDER BY blocked_seconds DESC
+ORDER BY blocked_query_age_seconds DESC
 LIMIT 50;
 ```
 
@@ -170,6 +171,9 @@ FROM pg_stat_statements
 ORDER BY total_exec_time DESC
 LIMIT 25;
 ```
+
+`total_exec_time` and `mean_exec_time` require PostgreSQL 13 or later. On
+PostgreSQL 12 and earlier, use `total_time` and `mean_time` instead.
 
 **Vacuum health**
 

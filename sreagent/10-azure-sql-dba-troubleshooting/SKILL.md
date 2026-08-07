@@ -5,7 +5,7 @@ description: >
   timeout, blocking, deadlock, storage, worker, session, and elastic-pool issues
   in Azure SQL Database. Use for active incidents, degraded database performance,
   failed connections, high CPU or DTU, high data or log IO, and DBA root-cause
-  analysis using Azure Monitor, Log Analytics, SQL Insights, and Query Store data.
+  analysis using Azure Monitor, Log Analytics, Intelligent Insights, and Query Store data.
 tools:
   - RunAzCliReadCommands
   - execute_kusto_query
@@ -20,7 +20,7 @@ tools:
 ## Purpose
 Perform a safe, evidence-driven DBA investigation for Azure SQL Database.
 Correlate database and elastic-pool configuration, Azure Monitor metrics,
-diagnostic logs, SQL Insights, Query Store exports, platform changes, and
+diagnostic logs, Intelligent Insights, Query Store exports, platform changes, and
 application symptoms. Produce a ranked root-cause assessment, reversible
 mitigation options, durable fixes, and measurable verification criteria.
 
@@ -30,7 +30,7 @@ mitigation options, durable fixes, and measurable verification criteria.
 - Connections fail intermittently or consistently
 - Performance changed after a deployment, configuration change, or scale event
 - A pooled database might be affected by elastic-pool contention
-- SQL Insights reports an active performance issue
+- Intelligent Insights reports an active performance issue
 - The user requests Azure SQL Database troubleshooting, DBA analysis, or RCA
 
 ## Diagnostic onboarding assumption
@@ -191,7 +191,10 @@ resource, not the workload responsible for consuming it.
 Use the exact database resource ID in every query. The following queries target
 the documented `AzureDiagnostics` shape.
 
-**SQL Insights**
+**Intelligent Insights**
+
+Use the `SQLInsights` resource-log category. This is Intelligent Insights, not
+the retired Azure Monitor SQL Insights preview.
 
 ```kusto
 AzureDiagnostics
@@ -212,7 +215,7 @@ AzureDiagnostics
 | where TimeGenerated between (datetime(<start-utc>) .. datetime(<end-utc>))
 | where ResourceProvider =~ "MICROSOFT.SQL"
 | where _ResourceId =~ "<database-resource-id>" and Category == "Errors"
-| extend ErrorNumber=tostring(column_ifexists("error_number_d", "")), Severity=tostring(column_ifexists("severity_d", "")), QueryHash=tostring(column_ifexists("query_hash_s", ""))
+| extend ErrorNumber=tostring(column_ifexists("error_number_d", "")), Severity=tostring(column_ifexists("Severity", "")), QueryHash=tostring(column_ifexists("query_hash_s", ""))
 | summarize Events=count(), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated) by ErrorNumber, Severity, QueryHash
 | top 20 by Events desc
 ```
@@ -243,10 +246,12 @@ AzureDiagnostics
 | where TimeGenerated between (datetime(<start-utc>) .. datetime(<end-utc>))
 | where ResourceProvider =~ "MICROSOFT.SQL"
 | where _ResourceId =~ "<database-resource-id>" and Category == "Blocks"
-| extend DurationMs=tolong(column_ifexists("duration_d", 0)), LockMode=tostring(column_ifexists("lock_mode_s", "")), OwnerType=tostring(column_ifexists("resource_owner_type_s", ""))
+| extend DurationMs=toreal(column_ifexists("duration_d", 0.0)) / 1000.0, LockMode=tostring(column_ifexists("lock_mode_s", "")), OwnerType=tostring(column_ifexists("resource_owner_type_s", ""))
 | summarize Events=count(), MaxDurationMs=max(DurationMs), TotalDurationMs=sum(DurationMs) by LockMode, OwnerType
 | top 20 by MaxDurationMs desc
 ```
+
+`duration_d` is reported in microseconds, so the query converts it to milliseconds.
 
 Do not print `blocked_process_filtered_s`. If deeper analysis is required,
 handle the XML as sensitive and report only redacted session, resource, lock

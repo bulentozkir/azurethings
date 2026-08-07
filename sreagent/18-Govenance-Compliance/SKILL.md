@@ -86,8 +86,8 @@ mark organization-specific checks as `Not assessed`, not failed.
 Inventory management groups and subscriptions.
 
 ```bash
-az account management-group list -o json
-az account management-group show --name <management-group-id> --expand --recurse -o json
+az account management-group list --no-register -o json
+az account management-group show --name <management-group-id> --expand --recurse --no-register -o json
 az account list --all --query "[].{name:name,id:id,state:state,tenantId:tenantId,isDefault:isDefault}" -o table
 ```
 
@@ -128,11 +128,11 @@ PolicyResources
 Review exemptions separately:
 
 ```kusto
-PolicyResources
+policyresources
 | where type =~ "microsoft.authorization/policyexemptions"
 | project
     name,
-    scope=tostring(properties.scope),
+    scope=substring(id, 0, indexof(tolower(id), "/providers/microsoft.authorization/policyexemptions/")),
     assignmentId=tostring(properties.policyAssignmentId),
     category=tostring(properties.exemptionCategory),
     expiresOn=todatetime(properties.expiresOn),
@@ -206,7 +206,9 @@ use Azure Policy when inheritance is required.
 Inventory locks at subscriptions, resource groups, and critical resources.
 
 ```bash
-az lock list --scope <scope> -o json
+az lock list --resource-group <rg> -o json
+az lock list --resource-group <rg> --resource <name> --resource-type <type> --namespace <provider> -o json
+az rest --method get --url "https://management.azure.com/subscriptions/<sub-id>/providers/Microsoft.Authorization/locks?api-version=2016-09-01" -o json
 ```
 
 Check:
@@ -269,7 +271,7 @@ resources
 | extend DiskState=tostring(properties.diskState)
 | where isempty(managedBy) and DiskState !~ "ActiveSAS"
 | where not(name startswith "ms-asr-" or name startswith "asrseeddisk-" or name endswith "-ASRReplica")
-| where tostring(tags) !has_any ("kubernetes.io-created-for-pvc", "ASR-ReplicaDisk", "RSVaultBackup")
+| where not(tostring(tags) has_any ("kubernetes.io-created-for-pvc", "ASR-ReplicaDisk", "RSVaultBackup"))
 | project id, name, subscriptionId, resourceGroup, location, sku, DiskState, properties.diskSizeGB, properties.timeCreated, tags
 ```
 
@@ -287,19 +289,22 @@ resources
 **Empty Azure SQL elastic pools**
 
 ```kusto
-let Pools = resources
+resources
 | where type =~ "microsoft.sql/servers/elasticpools"
-| project PoolId=tolower(id), id, name, subscriptionId, resourceGroup, location, sku, tags;
-let Databases = resources
-| where type =~ "microsoft.sql/servers/databases"
-| extend PoolId=tolower(tostring(properties.elasticPoolId))
-| where isnotempty(PoolId)
-| summarize DatabaseCount=count() by PoolId;
-Pools
-| join kind=leftouter Databases on PoolId
+| project PoolId=tolower(id), id, name, subscriptionId, resourceGroup, location, sku, tags
+| join kind=leftouter (
+    resources
+    | where type =~ "microsoft.sql/servers/databases"
+    | extend PoolId=tolower(tostring(properties.elasticPoolId))
+    | where isnotempty(PoolId)
+    | summarize DatabaseCount=count() by PoolId
+) on PoolId
 | where coalesce(DatabaseCount, 0) == 0
 | project-away PoolId1
 ```
+
+Azure Resource Graph doesn't support `let` statements; inline the subquery in
+the `join` as shown.
 
 Adapt other community patterns to current Azure schemas. Do not use
 `pack_all()` or return full properties by default; minimize sensitive output.

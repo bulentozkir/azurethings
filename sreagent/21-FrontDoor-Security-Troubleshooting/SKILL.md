@@ -258,7 +258,7 @@ AzureDiagnostics
 ```
 
 #### 15. Slow-response concentration by client
-`timeTaken_d` is seconds, so 10 represents a 10-second average.
+`timeTaken_d` is seconds, so `P95Latency > 10` is a p95 above 10 seconds.
 ```kusto
 AzureDiagnostics
 | where Category == "FrontDoorAccessLog"

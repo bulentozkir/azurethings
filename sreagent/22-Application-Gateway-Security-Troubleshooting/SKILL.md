@@ -429,6 +429,20 @@ WAF posture/findings, backend/routing/TLS/network/capacity findings, AGC finding
 ranked hypotheses/counterevidence, approval-gated remediation/rollback,
 verification/alerts, exact queries, redactions, gaps, and references.
 
+## Remediation guidance
+- Suggest only; never execute changes from this skill.
+- Prefer the narrowest rule or match-variable exclusion; never disable the WAF,
+  an entire managed rule set, or a broad rule group to clear a false positive.
+- Tune in Detection, validate known-good flows, then stage Prevention with
+  monitoring and a rollback plan.
+- Fix backend health at the source: probe path/status, host header, SNI,
+  certificate trust, timeouts, and capacity before relaxing probe sensitivity.
+- Keep TLS 1.2+ with current listener/backend certificates, valid chains, and a
+  reachable Key Vault using an authorized managed identity.
+- Size the subnet and autoscale bounds for peak plus scaling headroom.
+- Migrate diagnostic settings to resource-specific tables through approved
+  change control, and never expose raw WAF payloads in tickets.
+
 ## References
 - Application Gateway monitoring: https://learn.microsoft.com/azure/application-gateway/monitor-application-gateway
 - Resource-specific tables: https://learn.microsoft.com/azure/application-gateway/application-gateway-diagnostics

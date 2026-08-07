@@ -144,7 +144,7 @@ reconciliation. Retain `ListCost` and `ContractedCost` only for rate comparisons
 
 ```kusto
 Costs()
-| where ChargePeriodStart >= startofmonth(ago(120d))
+| where ChargePeriodStart >= startofmonth(now(), -3)
 | where ProviderName =~ "Microsoft"
 | summarize
     EffectiveCost=sum(EffectiveCost),

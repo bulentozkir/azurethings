@@ -43,7 +43,7 @@ az webapp show --resource-group <rg> --name <app> --slot <slot> -o json
 az webapp config show --resource-group <rg> --name <app> --slot <slot> -o json
 az appservice plan show --resource-group <rg> --name <plan> -o json
 az appservice ase list -o json
-az webapp list-instances --resource-group <rg> --name <app> -o table
+az webapp list-instances --resource-group <rg> --name <app> --slot <slot> -o table
 ```
 
 Record state, runtime/container, health path, Always On, 32/64-bit, worker count,

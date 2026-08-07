@@ -53,12 +53,12 @@ Each skill includes:
 - Purpose and guardrails
 - Prerequisites and scope checks
 - Step-by-step investigation or assessment procedure
-- Confidence or maturity scoring
-- Accepted-exception handling
+- Confidence, severity, or maturity scoring
 - Required report format
 - Remediation guidance
 - Official references
-- Redacted sample output
+
+Assessment-oriented skills also document accepted-exception handling and include a redacted sample report.
 
 ## Who is this for?
 
@@ -184,7 +184,7 @@ These skills are grounded primarily in:
 - [Azure Advisor](https://learn.microsoft.com/azure/advisor/)
 - [Azure Proactive Resiliency Library](https://azure.github.io/Azure-Proactive-Resiliency-Library-v2/)
 - [Azure Monitor Baseline Alerts](https://azure.github.io/azure-monitor-baseline-alerts/)
-- [FinOps Toolkit](https://learn.microsoft.com/cloud-computing/finops/toolkit/)
+- [FinOps Toolkit](https://learn.microsoft.com/cloud-computing/finops/toolkit/finops-toolkit-overview)
 - Azure MCP service capabilities and official Microsoft Learn service guidance
 
 ## Contact

@@ -208,7 +208,7 @@ applicable to the workload and that evidence freshness is acceptable.
 Use Policy Resources for effective assignments and noncompliance:
 
 ```kusto
-PolicyResources
+policyresources
 | where type =~ "microsoft.policyinsights/policystates"
 | extend
     ComplianceState=tostring(properties.complianceState),

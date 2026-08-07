@@ -462,6 +462,23 @@ ranked findings with severity/confidence/evidence/caveats/owner, rule/TI/IDPS/TL
 DNS analysis, health/SNAT/capacity/latency/flow analysis, topology/change findings,
 approval-gated remediation/rollback, verification, gaps, exact queries, and sources.
 
+## Remediation guidance
+- Suggest only; never execute changes from this skill.
+- Add the narrowest rule that satisfies the validated business flow; prefer
+  FQDN, URL, or service tags over broad IP or wildcard allows.
+- Fix rule order and policy inheritance before adding overlapping rules, and
+  keep DNAT, network, and application intent separated.
+- Investigate SNAT exhaustion with more public IPs or a NAT Gateway design
+  rather than by widening rules.
+- Treat IDPS and threat-intelligence findings as investigation input; move a
+  signature to Deny only after validating business impact.
+- Validate DNS proxy, upstream resolvers, and client DNS settings together when
+  FQDN filtering fails.
+- Enable flow trace, DNS flow trace, or fat-flow logs only temporarily and with
+  approval, then disable them after the investigation.
+- Migrate to resource-specific diagnostic settings through approved change
+  control and keep Analytics-plan tables where correlation is required.
+
 ## References
 - Monitor Azure Firewall: https://learn.microsoft.com/azure/firewall/monitor-firewall
 - Monitoring reference: https://learn.microsoft.com/azure/firewall/monitor-firewall-reference
