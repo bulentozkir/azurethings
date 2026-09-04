@@ -214,12 +214,20 @@
             "id": "t2",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
+            "linkLabel": "Security",
+            "subTarget": "security",
+            "style": "link"
+          },
+          {
+            "id": "t3",
+            "cellValue": "selectedTab",
+            "linkTarget": "parameter",
             "linkLabel": "Model deployments",
             "subTarget": "models",
             "style": "link"
           },
           {
-            "id": "t3",
+            "id": "t4",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "Model retirement",
@@ -227,7 +235,7 @@
             "style": "link"
           },
           {
-            "id": "t4",
+            "id": "t5",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "Account posture",
@@ -235,7 +243,7 @@
             "style": "link"
           },
           {
-            "id": "t5",
+            "id": "t6",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "Foundry projects",
@@ -243,7 +251,7 @@
             "style": "link"
           },
           {
-            "id": "t6",
+            "id": "t7",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "AI Hub and ML",
@@ -251,7 +259,7 @@
             "style": "link"
           },
           {
-            "id": "t7",
+            "id": "t8",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "Service retirements",
@@ -259,7 +267,7 @@
             "style": "link"
           },
           {
-            "id": "t8",
+            "id": "t9",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "Advisor and health",
@@ -267,7 +275,7 @@
             "style": "link"
           },
           {
-            "id": "t9",
+            "id": "t10",
             "cellValue": "selectedTab",
             "linkTarget": "parameter",
             "linkLabel": "About the data",
@@ -468,6 +476,540 @@
           {
             "type": 1,
             "content": {
+              "json": "## AI security posture\r\n\r\nControl-plane security review for every **Azure OpenAI**, **Microsoft Foundry**,\r\n**Cognitive Services** and **AI Hub / ML workspace** resource in the selected scope.\r\n\r\nThe tab answers seven questions:\r\n\r\n| Area | Question |\r\n| --- | --- |\r\n| **RBAC** | Who has privileged roles directly on an AI resource? |\r\n| **Network ingress** | Is the resource reachable from the public internet? |\r\n| **Network egress** | Can the resource call arbitrary outbound destinations? |\r\n| **Private endpoints** | Is Private Link configured, approved, and paired with disabled public access? |\r\n| **API keys** | Is key-based authentication still usable instead of Entra ID? |\r\n| **Key Vault** | Is a customer-managed key or workspace vault configured? |\r\n| **Managed identity** | Does the resource have an identity for keyless downstream access? |\r\n\r\n> **Measured limitation.** Azure Resource Graph returns **custom** role definitions\r\n> only, so built-in roles such as Owner and Contributor are resolved from their\r\n> well-known fixed GUIDs. A role that is neither is shown as *Unresolved role* with\r\n> its GUID rather than being silently dropped.",
+              "style": "warning"
+            },
+            "name": "secHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service'),\n    IdentityType = tostring(identity.type),\n    LocalAuthDisabled = tobool(properties.disableLocalAuth),\n    Pna = tostring(properties.publicNetworkAccess),\n    NetDefault = tostring(properties.networkAcls.defaultAction),\n    PeCount = toint(array_length(todynamic(properties.privateEndpointConnections))),\n    RestrictOutbound = tobool(properties.restrictOutboundNetworkAccess),\n    Isolation = tostring(properties.managedNetwork.isolationMode),\n    KeyVaultUri = coalesce(\n        tostring(properties.encryption.keyVaultProperties.keyVaultUri),\n        tostring(properties.keyVault))\n| summarize\n    Total = count(),\n    NoIdentity = countif(isempty(IdentityType) or IdentityType =~ 'None'),\n    KeyAuth = countif(LocalAuthDisabled != true),\n    PublicOpen = countif(Pna =~ 'Enabled' and PeCount == 0),\n    WithPrivateEndpoint = countif(PeCount > 0),\n    AclAllowAll = countif(isempty(NetDefault) or NetDefault =~ 'Allow'),\n    EgressOpen = countif(RestrictOutbound != true and isempty(Isolation)),\n    NoKeyVault = countif(isempty(KeyVaultUri))\n| extend Tiles = pack_array(\n    pack('Metric', 'AI resources in scope',      'Value', Total,               'Rank', 1),\n    pack('Metric', 'No managed identity',         'Value', NoIdentity,          'Rank', 2),\n    pack('Metric', 'API key auth enabled',        'Value', KeyAuth,             'Rank', 3),\n    pack('Metric', 'Public, no private endpoint', 'Value', PublicOpen,          'Rank', 4),\n    pack('Metric', 'Private endpoint configured', 'Value', WithPrivateEndpoint, 'Rank', 5),\n    pack('Metric', 'Network ACLs allow all',      'Value', AclAllowAll,         'Rank', 6),\n    pack('Metric', 'Egress unrestricted',         'Value', EgressOpen,          'Rank', 7),\n    pack('Metric', 'No Key Vault or CMK',         'Value', NoKeyVault,          'Rank', 8))\n| mv-expand Tiles\n| project Metric = tostring(Tiles.Metric), Value = toint(Tiles.Value), Rank = toint(Tiles.Rank)\n| order by Rank asc",
+              "size": 3,
+              "title": "Security posture summary",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "visualization": "tiles",
+              "tileSettings": {
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "style": "decimal",
+                      "maximumFractionDigits": 0
+                    }
+                  }
+                },
+                "showBorder": true,
+                "sortCriteriaField": "Rank",
+                "sortOrderField": 1
+              }
+            },
+            "name": "Securityposturesummary"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Identity, API keys, and Key Vault\r\n\r\n`API key auth` reports whether `disableLocalAuth` is set. When keys are enabled,\r\nanyone holding a key bypasses Entra ID and RBAC entirely. `Key Vault / CMK` shows the\r\ncustomer-managed key vault for Cognitive Services accounts and the linked workspace\r\nvault for ML workspaces."
+            },
+            "name": "secIdentityHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service'),\n    IdentityType = tostring(identity.type),\n    UserAssignedCount = toint(array_length(todynamic(identity.userAssignedIdentities))),\n    PrincipalId = tostring(identity.principalId),\n    LocalAuthDisabled = tobool(properties.disableLocalAuth),\n    Subdomain = tostring(properties.customSubDomainName),\n    CmkSource = tostring(properties.encryption.keySource),\n    KeyVaultUri = coalesce(\n        tostring(properties.encryption.keyVaultProperties.keyVaultUri),\n        tostring(properties.keyVault))\n| extend Findings = array_concat(\n    iff(isempty(IdentityType) or IdentityType =~ 'None', pack_array('No managed identity'), dynamic([])),\n    iff(LocalAuthDisabled != true, pack_array('API keys enabled'), dynamic([])),\n    iff(isempty(KeyVaultUri), pack_array('No Key Vault or customer-managed key'), dynamic([])),\n    iff(type =~ 'microsoft.cognitiveservices/accounts' and isempty(Subdomain), pack_array('No custom subdomain - Entra ID auth unavailable'), dynamic([])))\n| extend RiskRank = case(\n    array_length(Findings) >= 3, 0,\n    array_length(Findings) == 2, 1,\n    array_length(Findings) == 1, 2,\n    3)\n| project\n    Resource = name,\n    Subscription,\n    ['Resource group'] = resourceGroup,\n    Risk = case(RiskRank == 0, 'Critical', RiskRank == 1, 'High', RiskRank == 2, 'Medium', 'Healthy'),\n    Type = ResourceKind,\n    Region = location,\n    ['Managed identity'] = iff(isempty(IdentityType) or IdentityType =~ 'None', 'None', IdentityType),\n    ['User-assigned count'] = coalesce(UserAssignedCount, 0),\n    ['Identity principal ID'] = iff(isempty(PrincipalId), '-', PrincipalId),\n    ['API key auth'] = case(isnull(LocalAuthDisabled), 'Unknown', LocalAuthDisabled == true, 'Disabled (Entra ID only)', 'Enabled - keys usable'),\n    ['Key Vault / CMK'] = iff(isempty(KeyVaultUri), 'Microsoft-managed key', KeyVaultUri),\n    ['Encryption source'] = iff(isempty(CmkSource), 'Microsoft-managed', CmkSource),\n    ['Custom subdomain'] = iff(isempty(Subdomain), 'Not set', Subdomain),\n    Findings = iff(array_length(Findings) == 0, 'No findings', strcat_array(Findings, ' | ')),\n    RiskRank,\n    ResourceId = id\n| order by RiskRank asc, Resource asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Managed identity, API keys, and Key Vault",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "ManagedidentityAPIkeysandKeyVault"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### RBAC on AI resources\r\n\r\nRole assignments scoped **directly to the AI resource**. Roles inherited from the\r\nsubscription or resource group are not listed here; the coverage grid below reports\r\nwhether a resource has any direct assignments at all."
+            },
+            "name": "secRbacHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "authorizationresources\n| where type =~ 'microsoft.authorization/roleassignments'\n| extend\n    AssignmentScope = tolower(tostring(properties.scope)),\n    RoleDefinitionId = tolower(tostring(properties.roleDefinitionId)),\n    PrincipalType = tostring(properties.principalType),\n    PrincipalId = tostring(properties.principalId),\n    CreatedOn = todatetime(properties.createdOn)\n| where AssignmentScope has 'cognitiveservices/accounts' or AssignmentScope has 'machinelearningservices/workspaces'\n| extend RoleGuid = tostring(split(RoleDefinitionId, '/')[-1])\n| extend\n    BuiltInName = case(\n        RoleGuid == '8e3af657-a8ff-443c-a75c-2fe8c4bcb635', 'Owner',\n        RoleGuid == 'b24988ac-6180-42a0-ab88-20f7382dd24c', 'Contributor',\n        RoleGuid == '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9', 'User Access Administrator',\n        RoleGuid == 'acdd72a7-3385-48ef-bd42-f606fba81ae7', 'Reader',\n        RoleGuid == 'b78c5d69-af96-48a3-bf8d-a8b4d589de94', 'Azure AI Administrator',\n        RoleGuid == '53ca6127-db72-4b80-b1b0-d745d6d5456d', 'Foundry User',\n        RoleGuid == '64702f94-c441-49e6-a78b-ef80e0188fee', 'Azure AI Developer',\n        RoleGuid == '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68', 'Cognitive Services Contributor',\n        RoleGuid == 'a97b65f3-24c7-4388-baec-2e87135dc908', 'Cognitive Services User',\n        RoleGuid == '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd', 'Cognitive Services OpenAI User',\n        RoleGuid == 'a001fd3d-188f-4b5d-821b-7da978bf7442', 'Cognitive Services OpenAI Contributor',\n        RoleGuid == '19c28022-e58e-450d-a464-0b2a53034789', 'Cognitive Services Data Contributor (Preview)',\n        RoleGuid == 'cb43c632-a144-4ec5-977c-e80c4affc34a', 'Cognitive Services Metrics Advisor Administrator',\n        RoleGuid == 'f6c7c914-8db3-469d-8ca1-694a8f32e121', 'AzureML Data Scientist',\n        RoleGuid == 'e503ece1-11d0-4e8e-8e2c-7a6c3bf38815', 'AzureML Compute Operator',\n        RoleGuid == '635dd51f-9968-44d3-b7fb-6d9a6bd613ae', 'AzureML Metrics Writer (preview)',\n        RoleGuid == 'ea01e6af-a1c1-4350-9563-ad00f8c72ec5', 'Azure ML Workspace Connection Secrets Reader',\n        RoleGuid == '8ebe5a00-799e-43f5-93ac-243d3dce84a7', 'Search Index Data Contributor',\n        RoleGuid == '7ca78c08-252a-4471-8644-bb5ff32d4ba0', 'Search Service Contributor',\n        RoleGuid == '7f951dda-4ed3-4680-a7ca-43fe172d538d', 'AcrPull',\n        ''),\n    IsPrivilegedBuiltIn = RoleGuid in (\n        '8e3af657-a8ff-443c-a75c-2fe8c4bcb635',\n        'b24988ac-6180-42a0-ab88-20f7382dd24c',\n        '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9',\n        'b78c5d69-af96-48a3-bf8d-a8b4d589de94',\n        '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68',\n        'a001fd3d-188f-4b5d-821b-7da978bf7442',\n        '19c28022-e58e-450d-a464-0b2a53034789',\n        'cb43c632-a144-4ec5-977c-e80c4affc34a',\n        'ea01e6af-a1c1-4350-9563-ad00f8c72ec5')\n| join kind=leftouter (\n    authorizationresources\n    | where type =~ 'microsoft.authorization/roledefinitions'\n    | summarize\n        CustomName = any(tostring(properties.roleName)),\n        CustomType = any(tostring(properties.type))\n      by RoleGuid = tostring(split(tolower(id), '/')[-1])\n  ) on RoleGuid\n| extend\n    RoleName = case(\n        isnotempty(BuiltInName), BuiltInName,\n        isnotempty(CustomName), CustomName,\n        strcat('Unresolved role ', RoleGuid)),\n    RoleType = case(\n        isnotempty(BuiltInName), 'BuiltInRole',\n        isnotempty(CustomType), CustomType,\n        'Unknown'),\n    IsPrivileged = IsPrivilegedBuiltIn\n| join kind=inner (\n    resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service')\n    | project\n        AssignmentScope = tolower(id),\n        AiResource = name,\n        AiSubscription = Subscription,\n        AiResourceGroup = resourceGroup,\n        AiType = ResourceKind\n  ) on AssignmentScope\n| summarize\n    Assignments = count(),\n    Principals = dcount(PrincipalId),\n    PrincipalTypes = strcat_array(make_set(PrincipalType, 10), ', '),\n    LastAssigned = max(CreatedOn)\n  by AiResource, AiSubscription, AiResourceGroup, AiType, RoleName, RoleType, IsPrivileged, AssignmentScope\n| extend RiskRank = case(\n    IsPrivileged, 0,\n    RoleType == 'Unknown', 1,\n    2)\n| project\n    ['AI resource'] = AiResource,\n    Subscription = AiSubscription,\n    ['Resource group'] = AiResourceGroup,\n    Risk = case(\n        RiskRank == 0, 'High - privileged role on AI resource',\n        RiskRank == 1, 'Review - role definition not resolvable',\n        'Informational'),\n    Role = RoleName,\n    ['Role type'] = RoleType,\n    Assignments,\n    ['Distinct principals'] = Principals,\n    ['Principal types'] = PrincipalTypes,\n    Type = AiType,\n    ['Last assigned'] = LastAssigned,\n    RiskRank,\n    ResourceId = AssignmentScope\n| order by RiskRank asc, Assignments desc, ['AI resource'] asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Role assignments on AI resources",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Assignments",
+                    "sortOrder": 2
+                  }
+                ]
+              }
+            },
+            "name": "RoleassignmentsonAIresources"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service'),\n    ResourceScope = tolower(id),\n    LocalAuthDisabled = tobool(properties.disableLocalAuth)\n| join kind=leftouter (\n    authorizationresources\n    | where type =~ 'microsoft.authorization/roleassignments'\n    | extend\n        ResourceScope = tolower(tostring(properties.scope)),\n        PrincipalId = tostring(properties.principalId)\n    | where ResourceScope has 'cognitiveservices/accounts' or ResourceScope has 'machinelearningservices/workspaces'\n    | summarize\n        DirectAssignments = count(),\n        DirectPrincipals = dcount(PrincipalId)\n      by ResourceScope\n  ) on ResourceScope\n| extend\n    DirectAssignments = coalesce(DirectAssignments, 0),\n    DirectPrincipals = coalesce(DirectPrincipals, 0)\n| extend AccessModel = case(\n    DirectAssignments == 0 and LocalAuthDisabled == true, 'Entra ID only, no resource-scoped RBAC',\n    DirectAssignments == 0, 'No resource-scoped RBAC; keys or inherited roles only',\n    LocalAuthDisabled == true, 'Entra ID only with resource-scoped RBAC',\n    'Resource-scoped RBAC and API keys both usable')\n| extend RiskRank = case(\n    DirectAssignments == 0 and LocalAuthDisabled != true, 0,\n    LocalAuthDisabled != true, 1,\n    DirectAssignments == 0, 2,\n    3)\n| project\n    Resource = name,\n    Subscription,\n    ['Resource group'] = resourceGroup,\n    Risk = case(RiskRank == 0, 'High', RiskRank == 1, 'Medium', RiskRank == 2, 'Review', 'Healthy'),\n    ['Access model'] = AccessModel,\n    ['Resource-scoped assignments'] = DirectAssignments,\n    ['Distinct principals'] = DirectPrincipals,\n    ['API key auth'] = case(isnull(LocalAuthDisabled), 'Unknown', LocalAuthDisabled == true, 'Disabled', 'Enabled'),\n    Type = ResourceKind,\n    Region = location,\n    RiskRank,\n    ResourceId = id\n| order by RiskRank asc, ['Resource-scoped assignments'] desc, Resource asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Access model and RBAC coverage",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Resource-scoped assignments",
+                    "sortOrder": 2
+                  }
+                ]
+              }
+            },
+            "name": "AccessmodelandRBACcoverage"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Network ingress and egress\r\n\r\n`Exposure` combines public network access, network ACL default action, and private\r\nendpoint count into a single verdict. `Egress control` reports managed VNet isolation\r\nfor ML workspaces and outbound FQDN restriction for Cognitive Services accounts."
+            },
+            "name": "secNetworkHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service'),\n    Pna = tostring(properties.publicNetworkAccess),\n    NetDefault = tostring(properties.networkAcls.defaultAction),\n    IpRules = todynamic(properties.networkAcls.ipRules),\n    VnetRules = todynamic(properties.networkAcls.virtualNetworkRules),\n    PeCount = toint(array_length(todynamic(properties.privateEndpointConnections))),\n    Isolation = tostring(properties.managedNetwork.isolationMode)\n| extend\n    IpRuleCount = coalesce(toint(array_length(IpRules)), 0),\n    VnetRuleCount = coalesce(toint(array_length(VnetRules)), 0),\n    PeCount = coalesce(PeCount, 0)\n| extend Exposure = case(\n    Pna =~ 'Disabled' and PeCount > 0, 'Private endpoint only',\n    Pna =~ 'Disabled', 'Public access disabled',\n    PeCount > 0 and NetDefault =~ 'Deny', 'Private endpoint with ACL deny',\n    PeCount > 0, 'Public and private endpoint',\n    NetDefault =~ 'Deny' and (IpRuleCount > 0 or VnetRuleCount > 0), 'Public with ACL allow-list',\n    NetDefault =~ 'Deny', 'Public with deny-all ACL',\n    'Public open to all networks')\n| extend RiskRank = case(\n    Exposure == 'Public open to all networks', 0,\n    Exposure == 'Public and private endpoint', 1,\n    Exposure == 'Public with ACL allow-list', 2,\n    3)\n| project\n    Resource = name,\n    Subscription,\n    ['Resource group'] = resourceGroup,\n    Risk = case(RiskRank == 0, 'Critical', RiskRank == 1, 'High', RiskRank == 2, 'Medium', 'Healthy'),\n    Exposure,\n    Type = ResourceKind,\n    Region = location,\n    ['Public network access'] = iff(isempty(Pna), 'Unknown', Pna),\n    ['Network default action'] = iff(isempty(NetDefault), 'Allow (not configured)', NetDefault),\n    ['IP rules'] = IpRuleCount,\n    ['VNet rules'] = VnetRuleCount,\n    ['Private endpoints'] = PeCount,\n    ['Managed VNet isolation'] = iff(isempty(Isolation), 'Not configured', Isolation),\n    RiskRank,\n    ResourceId = id\n| order by RiskRank asc, ['Private endpoints'] asc, Resource asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Network ingress exposure",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "Networkingressexposure"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n| extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service'),\n    RestrictOutbound = tobool(properties.restrictOutboundNetworkAccess),\n    AllowedFqdn = todynamic(properties.allowedFqdnList),\n    Isolation = tostring(properties.managedNetwork.isolationMode),\n    OutboundRules = todynamic(properties.managedNetwork.outboundRules),\n    NetworkInjections = todynamic(properties.networkInjections)\n| extend\n    AllowedFqdnCount = coalesce(toint(array_length(AllowedFqdn)), 0),\n    OutboundRuleCount = coalesce(toint(array_length(OutboundRules)), 0),\n    InjectionCount = coalesce(toint(array_length(NetworkInjections)), 0)\n| extend EgressControl = case(\n    Isolation =~ 'AllowOnlyApprovedOutbound', 'Managed VNet - approved outbound only',\n    Isolation =~ 'AllowInternetOutbound', 'Managed VNet - internet outbound allowed',\n    Isolation =~ 'Disabled', 'Managed VNet disabled',\n    RestrictOutbound == true, 'Outbound restricted to allowed FQDNs',\n    isnotempty(Isolation), strcat('Managed VNet - ', Isolation),\n    'Unrestricted outbound')\n| extend RiskRank = case(\n    EgressControl == 'Unrestricted outbound', 0,\n    EgressControl == 'Managed VNet disabled', 0,\n    EgressControl == 'Managed VNet - internet outbound allowed', 1,\n    2)\n| project\n    Resource = name,\n    Subscription,\n    ['Resource group'] = resourceGroup,\n    Risk = case(RiskRank == 0, 'High', RiskRank == 1, 'Medium', 'Healthy'),\n    ['Egress control'] = EgressControl,\n    Type = ResourceKind,\n    Region = location,\n    ['Outbound restricted'] = case(isnull(RestrictOutbound), 'Not configured', RestrictOutbound == true, 'Yes', 'No'),\n    ['Allowed FQDN count'] = AllowedFqdnCount,\n    ['Managed VNet isolation'] = iff(isempty(Isolation), 'Not configured', Isolation),\n    ['Managed outbound rules'] = OutboundRuleCount,\n    ['VNet injections'] = InjectionCount,\n    RiskRank,\n    ResourceId = id\n| order by RiskRank asc, Resource asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Network egress control",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "Networkegresscontrol"
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "### Private endpoints\r\n\r\nPrivate endpoints are separate Azure resources, so this grid joins\r\n`microsoft.network/privateendpoints` back to the AI resource it targets. That is the\r\nonly way to see the endpoint name, subnet, and approval state. An empty grid means no\r\nprivate endpoint targets an AI resource in the selected scope."
+            },
+            "name": "secPeHead"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where type =~ 'microsoft.network/privateendpoints'\n| extend\n    Connections = todynamic(properties.privateLinkServiceConnections),\n    ManualConnections = todynamic(properties.manualPrivateLinkServiceConnections),\n    PeName = name,\n    PeResourceGroup = resourceGroup,\n    PeLocation = location,\n    PeId = id,\n    SubnetId = tostring(properties.subnet.id)\n| extend AllConnections = array_concat(Connections, ManualConnections)\n| mv-expand Connection = AllConnections\n| extend\n    TargetId = tolower(tostring(Connection.properties.privateLinkServiceId)),\n    GroupIds = strcat_array(todynamic(Connection.properties.groupIds), ', '),\n    ConnectionState = tostring(Connection.properties.privateLinkServiceConnectionState.status)\n| where TargetId has 'cognitiveservices/accounts' or TargetId has 'machinelearningservices/workspaces'\n| join kind=inner (\n    resources\n| where type =~ 'microsoft.cognitiveservices/accounts'\n   or type =~ 'microsoft.machinelearningservices/workspaces'\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | extend\n    ResourceKind = case(\n        type =~ 'microsoft.machinelearningservices/workspaces', 'ML workspace',\n        kind =~ 'OpenAI', 'Azure OpenAI',\n        kind =~ 'AIServices', 'Microsoft Foundry',\n        'Other AI service')\n    | project\n        TargetId = tolower(id),\n        AiResource = name,\n        AiSubscription = Subscription,\n        AiResourceGroup = resourceGroup,\n        AiType = ResourceKind,\n        AiPna = tostring(properties.publicNetworkAccess)\n  ) on TargetId\n| extend RiskRank = case(\n    ConnectionState !~ 'Approved', 0,\n    AiPna =~ 'Enabled', 1,\n    2)\n| project\n    ['AI resource'] = AiResource,\n    Subscription = AiSubscription,\n    ['Resource group'] = AiResourceGroup,\n    Risk = case(RiskRank == 0, 'High - connection not approved', RiskRank == 1, 'Medium - public access still enabled', 'Healthy'),\n    ['Private endpoint'] = PeName,\n    ['Connection state'] = iff(isempty(ConnectionState), 'Unknown', ConnectionState),\n    ['Sub-resource'] = iff(isempty(GroupIds), '-', GroupIds),\n    Type = AiType,\n    ['Public access enabled'] = iff(AiPna =~ 'Enabled', 'Yes', 'No'),\n    Subnet = iff(isempty(SubnetId), '-', tostring(split(SubnetId, '/')[-1])),\n    ['Endpoint resource group'] = PeResourceGroup,\n    Region = PeLocation,\n    RiskRank,\n    ResourceId = PeId\n| order by RiskRank asc, ['AI resource'] asc\n| project-away RiskRank",
+              "size": 2,
+              "title": "Private endpoints for AI resources",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Risk",
+                    "formatter": 18,
+                    "formatOptions": {
+                      "thresholdsOptions": "colors",
+                      "thresholdsGrid": [
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Critical",
+                          "representation": "redBright",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "High",
+                          "representation": "red",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Medium",
+                          "representation": "orange",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Review",
+                          "representation": "yellow",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Healthy",
+                          "representation": "green",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "contains",
+                          "thresholdValue": "Informational",
+                          "representation": "blue",
+                          "text": "{0}{1}"
+                        },
+                        {
+                          "operator": "Default",
+                          "representation": "gray",
+                          "text": "{0}{1}"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "name": "PrivateendpointsforAIresources"
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "selectedTab",
+        "comparison": "isEqualTo",
+        "value": "security"
+      },
+      "name": "group-security"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
               "json": "## Model deployments\r\n\r\n**Azure Resource Graph cannot see model deployments.** The type\r\n`microsoft.cognitiveservices/accounts/deployments` returns zero rows - this was\r\nmeasured against live deployments, not assumed.\r\n\r\nThis tab uses the **Azure Resource Manager** control plane, which returns deployments\r\nfor **one account at a time**. Click a row in the account list below to switch\r\naccounts, or use the **Model account** parameter at the top.\r\n\r\n> **Seeing an empty grid?** That usually means the selected account genuinely hosts\r\n> no models. **Microsoft Foundry (AI Services)** accounts are frequently used for\r\n> Document Intelligence, Speech or Vision rather than model hosting, so they\r\n> legitimately have zero deployments. Azure OpenAI accounts are therefore listed and\r\n> selected first. Try another account.\r\n\r\n> **Why not all accounts at once?** Workbook ARM queries only accept a single Azure\r\n> *resource* path - a tenant-level `POST /batch` is rejected with\r\n> *\"Path must be for an Azure Resource\"*, and a multi-value parameter is joined\r\n> into one malformed path rather than fanned out. Both were tested against the\r\n> live portal. The workbook therefore shows deployments for one selected account\r\n> at a time.",
               "style": "info"
             },
@@ -487,11 +1029,11 @@
               ],
               "showExportToExcel": true,
               "exportDefaultValue": "",
-              "exportFieldName": "ResourceId",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
               },
+              "exportFieldName": "ResourceId",
               "exportParameterName": "ModelAccounts"
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
@@ -512,6 +1054,16 @@
               "title": "Model deployments",
               "queryType": 12,
               "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "Capacity",
+                    "sortOrder": 2
+                  }
+                ]
+              },
               "exportedParameters": [
                 {
                   "fieldName": "Deployment",
@@ -543,21 +1095,28 @@
                   "parameterType": 1,
                   "defaultValue": ""
                 }
-              ],
-              "gridSettings": {
-                "rowLimit": 1000,
-                "filter": true,
-                "sortBy": [
-                  {
-                    "itemKey": "Capacity",
-                    "sortOrder": 2
-                  }
-                ]
-              }
+              ]
             },
             "name": "ModelDeployments"
           },
           {
+            "conditionalVisibilities": [
+              {
+                "parameterName": "SelectedDeploymentFormat",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              },
+              {
+                "parameterName": "SelectedDeploymentModel",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              },
+              {
+                "parameterName": "SelectedDeploymentVersion",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              }
+            ],
             "content": {
               "version": "KqlItem/1.0",
               "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"subscriptions/{AccountSubscription}/providers/Microsoft.CognitiveServices/locations/{AccountRegion}/models\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[?(@.kind == '{AccountKind}' && @.name == '{SelectedDeploymentFormat}.{SelectedDeploymentModel}.{SelectedDeploymentVersion}')]\",\"columns\":[{\"path\":\"name\",\"columnid\":\"Deployment\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentName}\"},{\"path\":\"model.name\",\"columnid\":\"Model\",\"columnType\":\"string\"},{\"path\":\"model.version\",\"columnid\":\"Version\",\"columnType\":\"string\"},{\"path\":\"model.format\",\"columnid\":\"Format\",\"columnType\":\"string\"},{\"path\":\"name\",\"columnid\":\"SKU\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentSku}\"},{\"path\":\"model.lifecycleStatus\",\"columnid\":\"Lifecycle\",\"columnType\":\"string\"},{\"path\":\"model.deprecation.inference\",\"columnid\":\"Inference retirement\",\"columnType\":\"datetime\"},{\"path\":\"model.deprecation.fineTune\",\"columnid\":\"Fine-tune retirement\",\"columnType\":\"datetime\"}]}}]}",
@@ -565,7 +1124,6 @@
               "title": "Retirement details for the selected deployment",
               "queryType": 12,
               "showExportToExcel": true,
-              "noDataMessage": "No exact regional catalog row was found for the selected deployment.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -614,27 +1172,11 @@
                     }
                   }
                 ]
-              }
+              },
+              "noDataMessage": "No exact regional catalog row was found for the selected deployment."
             },
             "name": "SelectedDeploymentRetirement",
-            "type": 3,
-            "conditionalVisibilities": [
-              {
-                "parameterName": "SelectedDeploymentFormat",
-                "comparison": "isNotEqualTo",
-                "value": ""
-              },
-              {
-                "parameterName": "SelectedDeploymentModel",
-                "comparison": "isNotEqualTo",
-                "value": ""
-              },
-              {
-                "parameterName": "SelectedDeploymentVersion",
-                "comparison": "isNotEqualTo",
-                "value": ""
-              }
-            ]
+            "type": 3
           }
         ]
       },
@@ -1137,12 +1679,12 @@
                 "filter": true
               }
             },
+            "name": "AdvisorRetirementMetadataRaw",
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
             },
-            "name": "AdvisorRetirementMetadataRaw",
             "type": 3
           },
           {
@@ -1162,31 +1704,24 @@
                 "filter": true
               }
             },
+            "name": "AdvisorRetirementResourceCounts",
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
             },
-            "name": "AdvisorRetirementResourceCounts",
             "type": 3
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"44b1e25a-2018-4f3d-aa64-946119fd3842\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"2f7ae06d-0b0d-48bc-9212-9461498ae543\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
               "size": 2,
               "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
               "queryType": 7,
               "showExportToExcel": true,
-              "exportedParameters": [
-                {
-                  "fieldName": "ServiceID",
-                  "parameterName": "SelectedRetirementServiceId",
-                  "parameterType": 1,
-                  "defaultValue": ""
-                }
-              ],
+              "noDataMessage": "No Advisor retirement metadata matched the selected domains.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1266,11 +1801,25 @@
                   }
                 ]
               },
-              "noDataMessage": "No Advisor retirement metadata matched the selected domains."
+              "exportedParameters": [
+                {
+                  "fieldName": "ServiceID",
+                  "parameterName": "SelectedRetirementServiceId",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ]
             },
             "name": "AdvisorRetirementSummary"
           },
           {
+            "conditionalVisibilities": [
+              {
+                "parameterName": "SelectedRetirementServiceId",
+                "comparison": "isNotEqualTo",
+                "value": ""
+              }
+            ],
             "content": {
               "version": "KqlItem/1.0",
               "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedRetirementServiceId}'\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | project\n        ResourceId = tolower(id),\n        Resource = name,\n        Subscription,\n        ['Resource group'] = resourceGroup,\n        Location = location,\n        ['Resource type'] = type,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Subscription,\n    ['Resource group'],\n    ['Resource type'],\n    Location,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Subscription, ['Resource group'], ['Resource type'], Location, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
@@ -1282,7 +1831,6 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
-              "noDataMessage": "No affected resources were found for the selected retirement in the current scope.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1299,17 +1847,11 @@
                     }
                   }
                 ]
-              }
+              },
+              "noDataMessage": "No affected resources were found for the selected retirement in the current scope."
             },
             "name": "AdvisorRetirementAffectedResources",
-            "type": 3,
-            "conditionalVisibilities": [
-              {
-                "parameterName": "SelectedRetirementServiceId",
-                "comparison": "isNotEqualTo",
-                "value": ""
-              }
-            ]
+            "type": 3
           }
         ]
       },
