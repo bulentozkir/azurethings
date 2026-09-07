@@ -1045,8 +1045,8 @@
                     "{Subscriptions}"
                   ],
                   "typeSettings": {
-                    "additionalResourceOptions": [],
-                    "showDefault": false
+                    "showDefault": false,
+                    "additionalResourceOptions": []
                   },
                   "description": "One subscription from the global selection. Cost Management is queried once per report, not once per estate subscription."
                 },
@@ -1058,7 +1058,6 @@
                   "type": 4,
                   "isRequired": true,
                   "typeSettings": {
-                    "allowCustom": true,
                     "selectableValues": [
                       {
                         "durationMs": 86400000
@@ -1072,7 +1071,8 @@
                       {
                         "durationMs": 7776000000
                       }
-                    ]
+                    ],
+                    "allowCustom": true
                   },
                   "value": {
                     "durationMs": 2592000000
@@ -1090,8 +1090,8 @@
                   "jsonData": "[{\"value\":\"summary\",\"label\":\"Cost by service\"},{\"value\":\"resources\",\"label\":\"Resource costs\"},{\"value\":\"meters\",\"label\":\"Model / token meter costs\"},{\"value\":\"daily\",\"label\":\"Daily cost trend\"},{\"value\":\"dailymeters\",\"label\":\"Daily cost by meter\"},{\"value\":\"tokens\",\"label\":\"Token usage by deployment\"}]",
                   "value": "summary",
                   "typeSettings": {
-                    "additionalResourceOptions": [],
-                    "showDefault": false
+                    "showDefault": false,
+                    "additionalResourceOptions": []
                   }
                 },
                 {
@@ -1105,8 +1105,8 @@
                   "jsonData": "[{\"value\":\"ActualCost\",\"label\":\"Actual cost\"},{\"value\":\"AmortizedCost\",\"label\":\"Amortized cost\"}]",
                   "value": "ActualCost",
                   "typeSettings": {
-                    "additionalResourceOptions": [],
-                    "showDefault": false
+                    "showDefault": false,
+                    "additionalResourceOptions": []
                   }
                 },
                 {
@@ -1125,8 +1125,8 @@
                     "{Subscriptions}"
                   ],
                   "typeSettings": {
-                    "additionalResourceOptions": [],
-                    "showDefault": false
+                    "showDefault": false,
+                    "additionalResourceOptions": []
                   },
                   "value": "*",
                   "description": "All AI resources for billing, or one resource for detailed meters. Token usage requires one model-hosting account."
@@ -1153,7 +1153,7 @@
                   "multiSelect": true,
                   "quote": "'",
                   "delimiter": ",",
-                  "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"body\":\"{CostMeterContext:$.meterBody}\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"[1]\",\"columnid\":\"value\",\"columnType\":\"string\"},{\"path\":\"[1]\",\"columnid\":\"label\",\"columnType\":\"string\"}]}}]}",
+                  "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"data\":\"{CostMeterContext:$.meterBody}\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"[1]\",\"columnid\":\"value\",\"columnType\":\"string\"},{\"path\":\"[1]\",\"columnid\":\"label\",\"columnType\":\"string\"}]}}]}",
                   "queryType": 12,
                   "typeSettings": {
                     "additionalResourceOptions": [
@@ -1217,11 +1217,11 @@
           },
           {
             "type": 1,
+            "name": "cost-invalid",
             "content": {
               "json": "{CostContext:$.status}",
               "style": "warning"
             },
-            "name": "cost-invalid",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostStatus",
@@ -1240,9 +1240,10 @@
           },
           {
             "type": 3,
+            "name": "cost-summary",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnid\":\"Service\",\"columnType\":\"string\",\"path\":\"[1]\"},{\"columnid\":\"Cost\",\"columnType\":\"number\",\"path\":\"[0]\"},{\"columnid\":\"Currency\",\"columnType\":\"string\",\"path\":\"[2]\"}]}}],\"body\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[1]\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[2]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "AI cost by service",
               "queryType": 12,
@@ -1259,7 +1260,6 @@
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
             },
-            "name": "cost-summary",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1275,9 +1275,10 @@
           },
           {
             "type": 3,
+            "name": "cost-resources",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"substringRegexMatch\":\"^.*/([^/]+)$\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"path\":\"[1]\",\"substringReplace\":\"$1\"},{\"columnid\":\"Cost\",\"columnType\":\"number\",\"path\":\"[0]\"},{\"columnid\":\"Currency\",\"columnType\":\"string\",\"path\":\"[3]\"},{\"columnid\":\"Service\",\"columnType\":\"string\",\"path\":\"[2]\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"Subscription\",\"columnType\":\"string\",\"path\":\"[1]\",\"substringReplace\":\"{CostSubscription:label}\"},{\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"path\":\"[1]\",\"substringReplace\":\"$1\"},{\"columnid\":\"Resource ID\",\"columnType\":\"string\",\"path\":\"[1]\"}]}}],\"body\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Resource\",\"substringReplace\":\"$1\",\"path\":\"[1]\",\"substringRegexMatch\":\"^.*/([^/]+)$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[3]\"},{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[2]\"},{\"columnType\":\"string\",\"columnid\":\"Subscription\",\"substringReplace\":\"{CostSubscription:label}\",\"path\":\"[1]\",\"substringRegexMatch\":\"^.*$\"},{\"columnType\":\"string\",\"columnid\":\"Resource group\",\"substringReplace\":\"$1\",\"path\":\"[1]\",\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\"},{\"columnType\":\"string\",\"columnid\":\"Resource ID\",\"path\":\"[1]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "AI resource costs - first response page",
               "queryType": 12,
@@ -1294,7 +1295,6 @@
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
             },
-            "name": "cost-resources",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1310,9 +1310,10 @@
           },
           {
             "type": 3,
+            "name": "cost-meters",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\",\"path\":\"[2]\"},{\"columnid\":\"Cost\",\"columnType\":\"number\",\"path\":\"[0]\"},{\"columnid\":\"Currency\",\"columnType\":\"string\",\"path\":\"[4]\"},{\"columnid\":\"Model family / meter subcategory\",\"columnType\":\"string\",\"path\":\"[3]\"},{\"columnid\":\"Quantity in billing units\",\"columnType\":\"number\",\"path\":\"[1]\"}]}}],\"body\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Billing meter / token unit\",\"path\":\"[2]\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[4]\"},{\"columnType\":\"string\",\"columnid\":\"Model family / meter subcategory\",\"path\":\"[3]\"},{\"columnType\":\"number\",\"columnid\":\"Quantity in billing units\",\"path\":\"[1]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Model and token meter costs - first response page",
               "queryType": 12,
@@ -1329,7 +1330,6 @@
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
             },
-            "name": "cost-meters",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1345,9 +1345,10 @@
           },
           {
             "type": 3,
+            "name": "cost-daily",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\",\"columnid\":\"Usage date (UTC)\",\"columnType\":\"datetime\",\"path\":\"[1]\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\"},{\"columnid\":\"Cost\",\"columnType\":\"number\",\"path\":\"[0]\"},{\"columnid\":\"Currency\",\"columnType\":\"string\",\"path\":\"[3]\"},{\"columnid\":\"Service\",\"columnType\":\"string\",\"path\":\"[2]\"}]}}],\"body\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"datetime\",\"columnid\":\"Usage date (UTC)\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\",\"path\":\"[1]\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[3]\"},{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[2]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Daily AI costs (UTC)",
               "queryType": 12,
@@ -1364,7 +1365,6 @@
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
             },
-            "name": "cost-daily",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1380,9 +1380,10 @@
           },
           {
             "type": 3,
+            "name": "cost-dailymeters",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\",\"columnid\":\"Usage date (UTC)\",\"columnType\":\"datetime\",\"path\":\"[1]\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\"},{\"columnid\":\"Cost\",\"columnType\":\"number\",\"path\":\"[0]\"},{\"columnid\":\"Currency\",\"columnType\":\"string\",\"path\":\"[4]\"},{\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\",\"path\":\"[2]\"},{\"columnid\":\"Model family / meter subcategory\",\"columnType\":\"string\",\"path\":\"[3]\"}]}}],\"body\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"datetime\",\"columnid\":\"Usage date (UTC)\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\",\"path\":\"[1]\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[4]\"},{\"columnType\":\"string\",\"columnid\":\"Billing meter / token unit\",\"path\":\"[2]\"},{\"columnType\":\"string\",\"columnid\":\"Model family / meter subcategory\",\"path\":\"[3]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Daily cost by billing meter (UTC) - first response page",
               "queryType": 12,
@@ -1399,7 +1400,6 @@
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
             },
-            "name": "cost-dailymeters",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1415,10 +1415,10 @@
           },
           {
             "type": 1,
+            "name": "cost-meter-filter-notes",
             "content": {
               "json": "**Billing meter filter:** the meter selection applies to every billing report, so\r\n**Cost by service**, **Resource costs** and both daily reports can be narrowed to\r\nspecific models or charge types the same way Cost analysis does. The list contains the\r\nmeters actually billed in the current scope and date range; leaving **All** selected\r\nremoves the filter. It does not apply to token usage, which is a platform metric\r\nrather than a billing dimension. The picker itself issues one extra Cost Management\r\nquery whenever the scope, dates or cost basis change."
             },
-            "name": "cost-meter-filter-notes",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1429,10 +1429,10 @@
           },
           {
             "type": 1,
+            "name": "cost-meter-notes",
             "content": {
               "json": "### Reading model and token meters\r\n\r\nThe **billing meter** identifies the billed model variant and input, output, cached\r\ninput, training, provisioned capacity or other charge when the service supplies that\r\ndetail. **Quantity is in billing units, not raw tokens**: for a meter explicitly\r\nlabelled `1M Tokens`, a quantity of 2 means two million billed tokens. Do not add\r\nquantities across different meters/units. Non-token meters can represent hours,\r\nrequests or other units; consult Cost Analysis / Cost Details for their unit of measure.\r\n\r\nModel-family labels are billing classifications, not deployment names. Multiple\r\ndeployments of the same model may share meters. Cached tokens, batch discounts, PTU\r\nreservations and negotiated prices prevent a reliable deployment-cost calculation\r\nfrom token totals alone. Choose an individual AI resource to narrow the meter costs."
             },
-            "name": "cost-meter-notes",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1458,10 +1458,10 @@
           },
           {
             "type": 1,
+            "name": "cost-token-notes",
             "content": {
               "json": "### Token usage (not billed token quantities)\r\n\r\nSelect one model-hosting account above. Platform metrics retain **93 days**, and this\r\nview accepts windows up to **31 days**. Counts below use the exact selected timestamps.\r\nInput includes cached input where the provider reports it; it is not necessarily\r\nfull-price input. Missing series are **unavailable**, not zeros.\r\n\r\nAzure OpenAI uses `ProcessedPromptTokens` / `GeneratedTokens`. Other Foundry models\r\ncan use `InputTokens` / `OutputTokens` instead; choose the metric family that applies\r\nto your deployment. Do not add the two families together. Billing meters remain the\r\nsource for monetary token costs, including charges that metrics do not represent."
             },
-            "name": "cost-token-notes",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1472,11 +1472,11 @@
           },
           {
             "type": 1,
+            "name": "cost-token-invalid",
             "content": {
               "json": "{CostContext:$.tokenStatus}",
               "style": "warning"
             },
-            "name": "cost-token-invalid",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1491,28 +1491,28 @@
             ]
           },
           {
+            "type": 9,
             "content": {
-              "version": "KqlParameterItem/1.0",
+              "style": "pills",
               "parameters": [
                 {
-                  "name": "CostTokenFamily",
                   "id": "cost-token-family",
-                  "type": 2,
-                  "label": "Token metric family",
-                  "isRequired": true,
-                  "version": "KqlParameterItem/1.0",
-                  "value": "openai",
-                  "jsonData": "[{\"value\":\"openai\",\"label\":\"Azure OpenAI\"},{\"value\":\"foundry\",\"label\":\"Other Foundry models\"}]",
                   "quote": "",
+                  "version": "KqlParameterItem/1.0",
+                  "jsonData": "[{\"value\":\"openai\",\"label\":\"Azure OpenAI\"},{\"value\":\"foundry\",\"label\":\"Other Foundry models\"}]",
+                  "type": 2,
+                  "name": "CostTokenFamily",
                   "typeSettings": {
-                    "additionalResourceOptions": [],
-                    "showDefault": false
-                  }
+                    "showDefault": false,
+                    "additionalResourceOptions": []
+                  },
+                  "isRequired": true,
+                  "label": "Token metric family",
+                  "value": "openai"
                 }
               ],
-              "style": "pills"
+              "version": "KqlParameterItem/1.0"
             },
-            "type": 9,
             "name": "cost-token-parameters",
             "conditionalVisibilities": [
               {
@@ -1524,9 +1524,10 @@
           },
           {
             "type": 3,
+            "name": "cost-token-ProcessedPromptTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"ProcessedPromptTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnid\":\"Deployment\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnid\":\"Input tokens\",\"columnType\":\"number\",\"path\":\"data[0].total\"},{\"columnid\":\"ModelVersion\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"ProcessedPromptTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Input tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelVersion\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
               "size": 2,
               "title": "Input tokens by deployment - ProcessedPromptTokens",
               "queryType": 12,
@@ -1543,7 +1544,6 @@
               },
               "noDataMessage": "No token time series returned. Check the selected account, metric family and dates; missing metrics do not prove zero usage."
             },
-            "name": "cost-token-ProcessedPromptTokens",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1564,9 +1564,10 @@
           },
           {
             "type": 3,
+            "name": "cost-token-GeneratedTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"GeneratedTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnid\":\"Deployment\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnid\":\"Output tokens\",\"columnType\":\"number\",\"path\":\"data[0].total\"},{\"columnid\":\"ModelVersion\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"GeneratedTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Output tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelVersion\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
               "size": 2,
               "title": "Output tokens by deployment - GeneratedTokens",
               "queryType": 12,
@@ -1583,7 +1584,6 @@
               },
               "noDataMessage": "No token time series returned. Check the selected account, metric family and dates; missing metrics do not prove zero usage."
             },
-            "name": "cost-token-GeneratedTokens",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1604,9 +1604,10 @@
           },
           {
             "type": 3,
+            "name": "cost-token-InputTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"InputTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnid\":\"Deployment\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnid\":\"Input tokens\",\"columnType\":\"number\",\"path\":\"data[0].total\"},{\"columnid\":\"ModelName\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"InputTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Input tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelName\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
               "size": 2,
               "title": "Input tokens by deployment - InputTokens",
               "queryType": 12,
@@ -1623,7 +1624,6 @@
               },
               "noDataMessage": "No token time series returned. Check the selected account, metric family and dates; missing metrics do not prove zero usage."
             },
-            "name": "cost-token-InputTokens",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1644,9 +1644,10 @@
           },
           {
             "type": 3,
+            "name": "cost-token-OutputTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"OutputTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnid\":\"Deployment\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnid\":\"Output tokens\",\"columnType\":\"number\",\"path\":\"data[0].total\"},{\"columnid\":\"ModelName\",\"columnType\":\"string\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"OutputTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Output tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelName\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
               "size": 2,
               "title": "Output tokens by deployment - OutputTokens",
               "queryType": 12,
@@ -1663,7 +1664,6 @@
               },
               "noDataMessage": "No token time series returned. Check the selected account, metric family and dates; missing metrics do not prove zero usage."
             },
-            "name": "cost-token-OutputTokens",
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1718,12 +1718,12 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
-              "exportParameterName": "ModelAccounts",
-              "exportFieldName": "ResourceId",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
               },
+              "exportFieldName": "ResourceId",
+              "exportParameterName": "ModelAccounts",
               "exportDefaultValue": ""
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
@@ -1744,6 +1744,16 @@
               "title": "Model deployments",
               "queryType": 12,
               "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "Capacity",
+                    "sortOrder": 2
+                  }
+                ]
+              },
               "exportedParameters": [
                 {
                   "fieldName": "Deployment",
@@ -1775,22 +1785,13 @@
                   "parameterType": 1,
                   "defaultValue": ""
                 }
-              ],
-              "gridSettings": {
-                "rowLimit": 1000,
-                "filter": true,
-                "sortBy": [
-                  {
-                    "itemKey": "Capacity",
-                    "sortOrder": 2
-                  }
-                ]
-              }
+              ]
             },
             "name": "ModelDeployments"
           },
           {
             "type": 3,
+            "name": "SelectedDeploymentRetirement",
             "content": {
               "version": "KqlItem/1.0",
               "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"subscriptions/{AccountSubscription}/providers/Microsoft.CognitiveServices/locations/{AccountRegion}/models\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[?(@.kind == '{AccountKind}' && @.name == '{SelectedDeploymentFormat}.{SelectedDeploymentModel}.{SelectedDeploymentVersion}')]\",\"columns\":[{\"path\":\"name\",\"columnid\":\"Deployment\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentName}\"},{\"path\":\"model.name\",\"columnid\":\"Model\",\"columnType\":\"string\"},{\"path\":\"model.version\",\"columnid\":\"Version\",\"columnType\":\"string\"},{\"path\":\"model.format\",\"columnid\":\"Format\",\"columnType\":\"string\"},{\"path\":\"name\",\"columnid\":\"SKU\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{SelectedDeploymentSku}\"},{\"path\":\"model.lifecycleStatus\",\"columnid\":\"Lifecycle\",\"columnType\":\"string\"},{\"path\":\"model.deprecation.inference\",\"columnid\":\"Inference retirement\",\"columnType\":\"datetime\"},{\"path\":\"model.deprecation.fineTune\",\"columnid\":\"Fine-tune retirement\",\"columnType\":\"datetime\"}]}}]}",
@@ -1798,7 +1799,6 @@
               "title": "Retirement details for the selected deployment",
               "queryType": 12,
               "showExportToExcel": true,
-              "noDataMessage": "No exact regional catalog row was found for the selected deployment.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1847,9 +1847,9 @@
                     }
                   }
                 ]
-              }
+              },
+              "noDataMessage": "No exact regional catalog row was found for the selected deployment."
             },
-            "name": "SelectedDeploymentRetirement",
             "conditionalVisibilities": [
               {
                 "parameterName": "SelectedDeploymentFormat",
@@ -2358,6 +2358,7 @@
           },
           {
             "type": 3,
+            "name": "AdvisorRetirementMetadataRaw",
             "content": {
               "version": "KqlItem/1.0",
               "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"providers/Microsoft.Advisor/metadata\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2025-01-01\"},{\"key\":\"$filter\",\"value\":\"recommendationSubCategory eq 'ServiceUpgradeAndRetirement' and retirementDate ge '2024-01-01'\"},{\"key\":\"$expand\",\"value\":\"ibiza\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].properties.supportedValues[?(@.supportedResourceType == 'microsoft.botservice/botservices' || @.supportedResourceType == 'microsoft.cognitiveservices/accounts' || @.supportedResourceType == 'microsoft.machinelearningservices/workspaces' || @.supportedResourceType == 'microsoft.recommendationsservice/accounts' || @.supportedResourceType == 'microsoft.search/searchservices' || @.supportedResourceType == 'microsoft.cache/redis' || @.supportedResourceType == 'microsoft.cache/redisenterprise' || @.supportedResourceType == 'microsoft.classicstorage/storageaccounts' || @.supportedResourceType == 'microsoft.databricks/workspaces' || @.supportedResourceType == 'microsoft.datafactory/factories' || @.supportedResourceType == 'microsoft.dbformariadb/servers' || @.supportedResourceType == 'microsoft.dbformysql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/flexibleservers' || @.supportedResourceType == 'microsoft.dbforpostgresql/servergroupsv2' || @.supportedResourceType == 'microsoft.dbforpostgresql/servers' || @.supportedResourceType == 'microsoft.documentdb/databaseaccounts' || @.supportedResourceType == 'microsoft.eventgrid/domains' || @.supportedResourceType == 'microsoft.eventgrid/namespaces' || @.supportedResourceType == 'microsoft.eventgrid/partnernamespaces' || @.supportedResourceType == 'microsoft.eventgrid/topics' || @.supportedResourceType == 'microsoft.eventhub/namespaces' || @.supportedResourceType == 'microsoft.fluidrelay/fluidrelayservers' || @.supportedResourceType == 'microsoft.hdinsight/clusters' || @.supportedResourceType == 'microsoft.healthcareapis/services' || @.supportedResourceType == 'microsoft.healthcareapis/workspaces/fhirservices' || @.supportedResourceType == 'microsoft.kusto/clusters' || @.supportedResourceType == 'microsoft.netapp/netappaccounts/capacitypools/volumes' || @.supportedResourceType == 'microsoft.operationalinsights/workspaces' || @.supportedResourceType == 'microsoft.purview/accounts' || @.supportedResourceType == 'microsoft.relay/namespaces' || @.supportedResourceType == 'microsoft.servicebus/namespaces' || @.supportedResourceType == 'microsoft.sql/managedinstances' || @.supportedResourceType == 'microsoft.sql/servers' || @.supportedResourceType == 'microsoft.sql/servers/databases' || @.supportedResourceType == 'microsoft.sqlvirtualmachine/sqlvirtualmachines' || @.supportedResourceType == 'microsoft.storage/storageaccounts' || @.supportedResourceType == 'microsoft.storagecache/caches' || @.supportedResourceType == 'microsoft.synapse/workspaces/bigdatapools' || @.supportedResourceType == 'microsoft.synapse/workspaces/kustopools' || @.supportedResourceType == 'microsoft.apimanagement/service' || @.supportedResourceType == 'microsoft.cdn/profiles' || @.supportedResourceType == 'microsoft.maps/accounts' || @.supportedResourceType == 'microsoft.network/applicationgateways' || @.supportedResourceType == 'microsoft.network/frontdoorwebapplicationfirewallpolicies' || @.supportedResourceType == 'microsoft.network/loadbalancers' || @.supportedResourceType == 'microsoft.network/networkwatchers/flowlogs' || @.supportedResourceType == 'microsoft.network/publicipaddresses' || @.supportedResourceType == 'microsoft.network/virtualnetworkgateways' || @.supportedResourceType == 'microsoft.aad/domainservices' || @.supportedResourceType == 'microsoft.app/containerapps' || @.supportedResourceType == 'microsoft.appplatform/spring' || @.supportedResourceType == 'microsoft.automation/automationaccounts' || @.supportedResourceType == 'microsoft.avs/privateclouds' || @.supportedResourceType == 'microsoft.batch/batchaccounts' || @.supportedResourceType == 'microsoft.compute/cloudservices' || @.supportedResourceType == 'microsoft.compute/disks' || @.supportedResourceType == 'microsoft.compute/virtualmachines' || @.supportedResourceType == 'microsoft.compute/virtualmachinescalesets' || @.supportedResourceType == 'microsoft.containerregistry/registries' || @.supportedResourceType == 'microsoft.containerservice/managedclusters' || @.supportedResourceType == 'microsoft.hybridcompute/machines' || @.supportedResourceType == 'microsoft.insights/activitylogalerts' || @.supportedResourceType == 'microsoft.insights/components' || @.supportedResourceType == 'microsoft.insights/datacollectionrules' || @.supportedResourceType == 'microsoft.insights/webtests' || @.supportedResourceType == 'microsoft.keyvault/managedhsms' || @.supportedResourceType == 'microsoft.keyvault/vaults' || @.supportedResourceType == 'microsoft.kubernetes/connectedclusters' || @.supportedResourceType == 'microsoft.kubernetesconfiguration/extensions' || @.supportedResourceType == 'microsoft.labservices/labaccounts' || @.supportedResourceType == 'microsoft.labservices/labplans' || @.supportedResourceType == 'microsoft.labservices/labs' || @.supportedResourceType == 'microsoft.monitor/accounts' || @.supportedResourceType == 'microsoft.operationsmanagement/solutions' || @.supportedResourceType == 'microsoft.recoveryservices/vaults' || @.supportedResourceType == 'microsoft.servicefabric/clusters' || @.supportedResourceType == 'microsoft.subscriptions/subscriptions' || @.supportedResourceType == 'microsoft.web/sites' || @.supportedResourceType == 'microsoft.web/staticsites')]\",\"columns\":[{\"path\":\"id\",\"columnid\":\"Id\",\"columnType\":\"string\"},{\"path\":\"resourceMetadata.singular\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"displayName\",\"columnid\":\"Retirement\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementFeatureName\",\"columnid\":\"Feature\",\"columnType\":\"string\"},{\"path\":\"sourceProperties.serviceRetirement.retirementDate\",\"columnid\":\"Retirement date\",\"columnType\":\"datetime\"},{\"path\":\"supportedResourceType\",\"columnid\":\"Resource type\",\"columnType\":\"string\"},{\"path\":\"learnMoreLink\",\"columnid\":\"Learn more\",\"columnType\":\"string\"}]}}]}",
@@ -2370,7 +2371,6 @@
                 "filter": true
               }
             },
-            "name": "AdvisorRetirementMetadataRaw",
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
@@ -2379,6 +2379,7 @@
           },
           {
             "type": 3,
+            "name": "AdvisorRetirementResourceCounts",
             "content": {
               "version": "KqlItem/1.0",
               "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId)\n| where isnotempty(ResourceId) and isnotempty(ServiceID)\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | project ResourceId = tolower(id)\n  ) on ResourceId\n| summarize ['# Resources'] = dcount(ResourceId) by ServiceID\n| where ['# Resources'] > 0\n| order by ['# Resources'] desc",
@@ -2395,7 +2396,6 @@
                 "filter": true
               }
             },
-            "name": "AdvisorRetirementResourceCounts",
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
@@ -2406,12 +2406,11 @@
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"51de2c4c-2fbb-4c74-b27b-82255c71afbc\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
               "size": 2,
               "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
               "queryType": 7,
               "showExportToExcel": true,
-              "noDataMessage": "No Advisor retirement metadata matched the selected domains.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -2498,12 +2497,14 @@
                   "parameterType": 1,
                   "defaultValue": ""
                 }
-              ]
+              ],
+              "noDataMessage": "No Advisor retirement metadata matched the selected domains."
             },
             "name": "AdvisorRetirementSummary"
           },
           {
             "type": 3,
+            "name": "AdvisorRetirementAffectedResources",
             "content": {
               "version": "KqlItem/1.0",
               "query": "advisorresources\n| where type =~ 'microsoft.advisor/recommendations'\n| where iff(strlen(name) == 36, properties.lastUpdated > ago(1d), properties.platformState == 'New')\n| where isempty(properties.tracked)\n| extend\n    ResourceId = tolower(tostring(properties.resourceMetadata.resourceId)),\n    ServiceID = tostring(properties.recommendationTypeId),\n    RecommendationState = tostring(properties.platformState)\n| where isnotempty(ResourceId)\n    and isnotempty(ServiceID)\n    and ServiceID == '{SelectedRetirementServiceId}'\n| join kind=inner (\n    resources\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | join kind=leftouter (\n    resourcecontainers\n    | where type =~ 'microsoft.resources/subscriptions'\n    | project subscriptionId, Subscription = name\n  ) on subscriptionId\n    | project\n        ResourceId = tolower(id),\n        Resource = name,\n        Subscription,\n        ['Resource group'] = resourceGroup,\n        Location = location,\n        ['Resource type'] = type,\n        Tags = tostring(tags)\n  ) on ResourceId\n| project\n    Resource,\n    Subscription,\n    ['Resource group'],\n    ['Resource type'],\n    Location,\n    ['Recommendation state'] = RecommendationState,\n    ResourceId,\n    Tags\n| distinct Resource, Subscription, ['Resource group'], ['Resource type'], Location, ['Recommendation state'], ResourceId, Tags\n| order by Resource asc",
@@ -2515,7 +2516,6 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
-              "noDataMessage": "No affected resources were found for the selected retirement in the current scope.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -2532,9 +2532,9 @@
                     }
                   }
                 ]
-              }
+              },
+              "noDataMessage": "No affected resources were found for the selected retirement in the current scope."
             },
-            "name": "AdvisorRetirementAffectedResources",
             "conditionalVisibilities": [
               {
                 "parameterName": "SelectedRetirementServiceId",
