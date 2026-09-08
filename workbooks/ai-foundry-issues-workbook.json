@@ -1018,7 +1018,7 @@
           {
             "type": 1,
             "content": {
-              "json": "## AI costs and token usage\r\n\r\nChoose a **cost subscription**, **date range** (including custom dates), report, and\r\noptionally one AI resource. The global **Subscriptions** and **Resource groups**\r\nfilters still apply. Billing includes Cognitive Services / Foundry / Azure OpenAI,\r\nML workspaces and AI Search, using resource types rather than changing service names.\r\n\r\n**Billing costs and token metrics are different measurements.** Meter costs use your\r\nCost Management charges and billing currency, not public list-price estimates.\r\nToken metrics are operational usage, not an invoice or an exact per-deployment cost.\r\nNo prompts, completions, API keys, or secret values are read."
+              "json": "## AI costs and token usage\r\n\r\nChoose **one cost subscription**, a **date range** (including custom dates), report,\r\nand cost basis. Use **AI resources** and **Billing meter** to narrow the results;\r\nboth filters support multiple selections. Select **All** to include all AI resources.\r\nThe global **Subscriptions** and **Resource groups** filters still apply, but each\r\nCost report queries only the single selected cost subscription. Billing includes\r\nCognitive Services / Foundry / Azure OpenAI, ML workspaces and AI Search, using\r\nresource types rather than changing service names.\r\n\r\n**Billing costs and token metrics are different measurements.** Meter costs use your\r\nCost Management charges and billing currency, not public list-price estimates.\r\nToken metrics are operational usage, not an invoice or an exact per-deployment cost.\r\nNo prompts, completions, API keys, or secret values are read."
             },
             "name": "cost-head"
           },
@@ -1045,8 +1045,8 @@
                     "{Subscriptions}"
                   ],
                   "typeSettings": {
-                    "showDefault": false,
-                    "additionalResourceOptions": []
+                    "additionalResourceOptions": [],
+                    "showDefault": false
                   },
                   "description": "One subscription from the global selection. Cost Management is queried once per report, not once per estate subscription."
                 },
@@ -1058,6 +1058,7 @@
                   "type": 4,
                   "isRequired": true,
                   "typeSettings": {
+                    "allowCustom": true,
                     "selectableValues": [
                       {
                         "durationMs": 86400000
@@ -1071,8 +1072,7 @@
                       {
                         "durationMs": 7776000000
                       }
-                    ],
-                    "allowCustom": true
+                    ]
                   },
                   "value": {
                     "durationMs": 2592000000
@@ -1087,11 +1087,11 @@
                   "type": 2,
                   "isRequired": true,
                   "quote": "",
-                  "jsonData": "[{\"value\":\"summary\",\"label\":\"Cost by service\"},{\"value\":\"resources\",\"label\":\"Resource costs\"},{\"value\":\"meters\",\"label\":\"Model / token meter costs\"},{\"value\":\"daily\",\"label\":\"Daily cost trend\"},{\"value\":\"dailymeters\",\"label\":\"Daily cost by meter\"},{\"value\":\"tokens\",\"label\":\"Token usage by deployment\"}]",
+                  "jsonData": "[{\"value\":\"summary\",\"label\":\"Cost by service\"},{\"value\":\"resources\",\"label\":\"Resource costs\"},{\"value\":\"meters\",\"label\":\"Model / token meter costs\"},{\"value\":\"daily\",\"label\":\"Daily cost trend\"},{\"value\":\"dailymeters\",\"label\":\"Daily cost by meter\"},{\"value\":\"resourcemeters\",\"label\":\"Resource and model meter costs\"},{\"value\":\"dailyresourcemeters\",\"label\":\"Daily resource and model meter costs\"},{\"value\":\"tokens\",\"label\":\"Token usage by deployment\"}]",
                   "value": "summary",
                   "typeSettings": {
-                    "showDefault": false,
-                    "additionalResourceOptions": []
+                    "additionalResourceOptions": [],
+                    "showDefault": false
                   }
                 },
                 {
@@ -1105,31 +1105,37 @@
                   "jsonData": "[{\"value\":\"ActualCost\",\"label\":\"Actual cost\"},{\"value\":\"AmortizedCost\",\"label\":\"Amortized cost\"}]",
                   "value": "ActualCost",
                   "typeSettings": {
-                    "showDefault": false,
-                    "additionalResourceOptions": []
+                    "additionalResourceOptions": [],
+                    "showDefault": false
                   }
                 },
                 {
                   "id": "cost-resource",
                   "version": "KqlParameterItem/1.0",
                   "name": "CostResource",
-                  "label": "AI resource",
+                  "label": "AI resources",
                   "type": 2,
                   "isRequired": true,
-                  "multiSelect": false,
-                  "quote": "",
-                  "query": "resources\n| where subscriptionId == '{CostSubscription}'\n| where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| order by name asc\n| summarize Rows = make_list(pack('value', id, 'label', strcat(name, ' [', resourceGroup, ']'), 'selected', false), 10000)\n| extend Rows = array_concat(pack_array(pack('value', '*', 'label', 'All AI resources', 'selected', true)), Rows)\n| mv-expand Row = Rows\n| project value = tostring(Row.value), label = tostring(Row.label), selected = tobool(Row.selected)",
+                  "multiSelect": true,
+                  "quote": "'",
+                  "delimiter": ",",
+                  "query": "resources\n| where subscriptionId == '{CostSubscription}'\n| where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| order by name asc\n| project value = tolower(id), label = strcat(name, ' [', resourceGroup, ']'), selected = false",
                   "queryType": 1,
                   "resourceType": "microsoft.resourcegraph/resources",
                   "crossComponentResources": [
                     "{Subscriptions}"
                   ],
                   "typeSettings": {
-                    "showDefault": false,
-                    "additionalResourceOptions": []
+                    "additionalResourceOptions": [
+                      "value::all"
+                    ],
+                    "selectAllValue": "*",
+                    "showDefault": false
                   },
-                  "value": "*",
-                  "description": "All AI resources for billing, or one resource for detailed meters. Token usage requires one model-hosting account."
+                  "value": [
+                    "value::all"
+                  ],
+                  "description": "Choose All or multiple AI resources within the selected cost subscription. The resource filter applies to every billing report and the meter picker. Token usage requires exactly one model-hosting account."
                 },
                 {
                   "id": "cost-meter-context",
@@ -1137,7 +1143,7 @@
                   "name": "CostMeterContext",
                   "type": 1,
                   "isHiddenWhenLocked": true,
-                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id =~ '{CostResource}'\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), Report = '{CostReport}', Basis = '{CostBasis}'\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    isempty('{CostResource}'), 'Select All AI resources or an AI resource.',\n    '{CostResource}' != '*' and ResourceCount != 1, 'The selected resource is outside the current scope. Select another resource or All AI resources.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff('{CostResource}' == '*', Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', pack_array('{CostResource}'))))))\n| extend MeterBody = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', 'None',\n        'aggregation', pack('totalCost', pack('name', 'Cost', 'function', 'Sum')),\n        'grouping', pack_array(pack('type', 'Dimension', 'name', 'Meter')),\n        'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| project value = tostring(pack('status', Status, 'meterBody', tostring(MeterBody))), selected = true",
+                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id in~ (dynamic([{CostResource}]))\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type),\n        ResourceName = take_any(name), ResourceGroup = take_any(resourceGroup), ResourceRegion = take_any(location)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), SelectedResources = dynamic([{CostResource}]),\n    Report = '{CostReport}', Basis = '{CostBasis}'\n| extend AllResources = array_length(SelectedResources) == 1 and set_has_element(SelectedResources, '*')\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    array_length(SelectedResources) == 0 or set_has_element(SelectedResources, ''), 'Select All or one or more AI resources.',\n    not(AllResources) and set_has_element(SelectedResources, '*'), 'Select either All or specific AI resources, not both.',\n    not(AllResources) and ResourceCount != array_length(SelectedResources),\n        'One or more selected AI resources are outside the current subscription or resource-group scope. Reselect the AI resources or choose All.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters', 'dailyresourcemeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'resourcemeters', 'dailyresourcemeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff(AllResources, Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', SelectedResources)))))\n| extend MeterBody = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', 'None',\n        'aggregation', pack('totalCost', pack('name', 'Cost', 'function', 'Sum')),\n        'grouping', pack_array(pack('type', 'Dimension', 'name', 'Meter')),\n        'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| project value = tostring(pack('status', Status, 'meterBody', tostring(MeterBody))), selected = true",
                   "queryType": 1,
                   "resourceType": "microsoft.resourcegraph/resources",
                   "crossComponentResources": [
@@ -1153,12 +1159,13 @@
                   "multiSelect": true,
                   "quote": "'",
                   "delimiter": ",",
-                  "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"data\":\"{CostMeterContext:$.meterBody}\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"[1]\",\"columnid\":\"value\",\"columnType\":\"string\"},{\"path\":\"[1]\",\"columnid\":\"label\",\"columnType\":\"string\"}]}}]}",
+                  "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"data\":\"{CostMeterContext:$.meterBody}\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[1]\",\"columnid\":\"value\",\"columnType\":\"string\"},{\"path\":\"$[1]\",\"columnid\":\"label\",\"columnType\":\"string\"}]}}]}",
                   "queryType": 12,
                   "typeSettings": {
                     "additionalResourceOptions": [
                       "value::all"
                     ],
+                    "selectAllValue": "*",
                     "showDefault": false
                   },
                   "value": [
@@ -1172,7 +1179,7 @@
                   "name": "CostContext",
                   "type": 1,
                   "isHiddenWhenLocked": true,
-                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id =~ '{CostResource}'\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), Report = '{CostReport}', Basis = '{CostBasis}'\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    isempty('{CostResource}'), 'Select All AI resources or an AI resource.',\n    '{CostResource}' != '*' and ResourceCount != 1, 'The selected resource is outside the current scope. Select another resource or All AI resources.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff('{CostResource}' == '*', Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', pack_array('{CostResource}'))))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report == 'meters',\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    '{CostResource}' == '*', 'Select one Azure OpenAI or Foundry account to view token usage.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'body', tostring(Body))), selected = true",
+                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id in~ (dynamic([{CostResource}]))\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type),\n        ResourceName = take_any(name), ResourceGroup = take_any(resourceGroup), ResourceRegion = take_any(location)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), SelectedResources = dynamic([{CostResource}]),\n    Report = '{CostReport}', Basis = '{CostBasis}'\n| extend AllResources = array_length(SelectedResources) == 1 and set_has_element(SelectedResources, '*')\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    array_length(SelectedResources) == 0 or set_has_element(SelectedResources, ''), 'Select All or one or more AI resources.',\n    not(AllResources) and set_has_element(SelectedResources, '*'), 'Select either All or specific AI resources, not both.',\n    not(AllResources) and ResourceCount != array_length(SelectedResources),\n        'One or more selected AI resources are outside the current subscription or resource-group scope. Reselect the AI resources or choose All.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters', 'dailyresourcemeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'resourcemeters', 'dailyresourcemeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff(AllResources, Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', SelectedResources)))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Status = case(\n    Status != 'ready', Status,\n    Report != 'tokens' and not(set_has_element(Meters, '*')) and set_has_element(Meters, ''),\n        'The billing meter selection contains a blank value. Refresh the meter picker and select All or a named meter.',\n    'ready')\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('resourcemeters', 'dailyresourcemeters'), pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'Meter')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report in ('meters', 'resourcemeters', 'dailyresourcemeters'),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters', 'dailyresourcemeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    AllResources or array_length(SelectedResources) != 1, 'Token usage requires exactly one Azure OpenAI or Foundry account. Select one AI resource; billing reports support multiple resources.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| extend TokenResource = iff(TokenStatus == 'ready', tostring(SelectedResources[0]), '')\n| extend Export = iff(TokenStatus == 'ready', pack(\n    'resourceName', ResourceName, 'resourceGroup', ResourceGroup,\n    'resourceId', TokenResource,\n    'resourceType', ResourceType, 'resourceKind', ResourceKind, 'resourceRegion', ResourceRegion), dynamic({}))\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'tokenResource', TokenResource,\n    'body', tostring(Body), 'export', Export)), selected = true",
                   "queryType": 1,
                   "resourceType": "microsoft.resourcegraph/resources",
                   "crossComponentResources": [
@@ -1185,7 +1192,7 @@
                   "name": "CostStatus",
                   "type": 1,
                   "isHiddenWhenLocked": true,
-                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id =~ '{CostResource}'\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), Report = '{CostReport}', Basis = '{CostBasis}'\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    isempty('{CostResource}'), 'Select All AI resources or an AI resource.',\n    '{CostResource}' != '*' and ResourceCount != 1, 'The selected resource is outside the current scope. Select another resource or All AI resources.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff('{CostResource}' == '*', Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', pack_array('{CostResource}'))))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report == 'meters',\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    '{CostResource}' == '*', 'Select one Azure OpenAI or Foundry account to view token usage.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'body', tostring(Body))), selected = true\n| project value = tostring(parse_json(value).status), selected = true",
+                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id in~ (dynamic([{CostResource}]))\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type),\n        ResourceName = take_any(name), ResourceGroup = take_any(resourceGroup), ResourceRegion = take_any(location)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), SelectedResources = dynamic([{CostResource}]),\n    Report = '{CostReport}', Basis = '{CostBasis}'\n| extend AllResources = array_length(SelectedResources) == 1 and set_has_element(SelectedResources, '*')\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    array_length(SelectedResources) == 0 or set_has_element(SelectedResources, ''), 'Select All or one or more AI resources.',\n    not(AllResources) and set_has_element(SelectedResources, '*'), 'Select either All or specific AI resources, not both.',\n    not(AllResources) and ResourceCount != array_length(SelectedResources),\n        'One or more selected AI resources are outside the current subscription or resource-group scope. Reselect the AI resources or choose All.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters', 'dailyresourcemeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'resourcemeters', 'dailyresourcemeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff(AllResources, Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', SelectedResources)))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Status = case(\n    Status != 'ready', Status,\n    Report != 'tokens' and not(set_has_element(Meters, '*')) and set_has_element(Meters, ''),\n        'The billing meter selection contains a blank value. Refresh the meter picker and select All or a named meter.',\n    'ready')\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('resourcemeters', 'dailyresourcemeters'), pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'Meter')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report in ('meters', 'resourcemeters', 'dailyresourcemeters'),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters', 'dailyresourcemeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    AllResources or array_length(SelectedResources) != 1, 'Token usage requires exactly one Azure OpenAI or Foundry account. Select one AI resource; billing reports support multiple resources.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| extend TokenResource = iff(TokenStatus == 'ready', tostring(SelectedResources[0]), '')\n| extend Export = iff(TokenStatus == 'ready', pack(\n    'resourceName', ResourceName, 'resourceGroup', ResourceGroup,\n    'resourceId', TokenResource,\n    'resourceType', ResourceType, 'resourceKind', ResourceKind, 'resourceRegion', ResourceRegion), dynamic({}))\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'tokenResource', TokenResource,\n    'body', tostring(Body), 'export', Export)), selected = true\n| project value = tostring(parse_json(value).status), selected = true",
                   "queryType": 1,
                   "resourceType": "microsoft.resourcegraph/resources",
                   "crossComponentResources": [
@@ -1198,7 +1205,7 @@
                   "name": "CostTokenStatus",
                   "type": 1,
                   "isHiddenWhenLocked": true,
-                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id =~ '{CostResource}'\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), Report = '{CostReport}', Basis = '{CostBasis}'\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    isempty('{CostResource}'), 'Select All AI resources or an AI resource.',\n    '{CostResource}' != '*' and ResourceCount != 1, 'The selected resource is outside the current scope. Select another resource or All AI resources.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff('{CostResource}' == '*', Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', pack_array('{CostResource}'))))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report == 'meters',\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    '{CostResource}' == '*', 'Select one Azure OpenAI or Foundry account to view token usage.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'body', tostring(Body))), selected = true\n| project value = tostring(parse_json(value).tokenStatus), selected = true",
+                  "query": "resourcecontainers\n| where type =~ 'microsoft.resources/subscriptions'\n| where subscriptionId == '{CostSubscription}'\n| summarize SubscriptionCount = count()\n| extend JoinKey = 1\n| join kind=leftouter (\n    resources\n    | where subscriptionId == '{CostSubscription}'\n    | where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n    | extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n    | where id in~ (dynamic([{CostResource}]))\n    | summarize ResourceCount = count(), ResourceKind = take_any(kind), ResourceType = take_any(type),\n        ResourceName = take_any(name), ResourceGroup = take_any(resourceGroup), ResourceRegion = take_any(location)\n    | extend JoinKey = 1\n) on JoinKey\n| extend Start = todatetime('{CostTimeRange:startISO}'), End = todatetime('{CostTimeRange:endISO}'),\n    Groups = dynamic([{ResourceGroups}]), SelectedResources = dynamic([{CostResource}]),\n    Report = '{CostReport}', Basis = '{CostBasis}'\n| extend AllResources = array_length(SelectedResources) == 1 and set_has_element(SelectedResources, '*')\n| extend Status = case(\n    SubscriptionCount != 1, 'Select a cost subscription within the global subscription selection.',\n    array_length(SelectedResources) == 0 or set_has_element(SelectedResources, ''), 'Select All or one or more AI resources.',\n    not(AllResources) and set_has_element(SelectedResources, '*'), 'Select either All or specific AI resources, not both.',\n    not(AllResources) and ResourceCount != array_length(SelectedResources),\n        'One or more selected AI resources are outside the current subscription or resource-group scope. Reselect the AI resources or choose All.',\n    isnull(Start) or isnull(End) or End <= Start, 'Choose a valid, non-empty date range.',\n    End > now() + 5m, 'Choose a date range ending no later than now.',\n    End - Start > 365d, 'Cost reports support up to 365 days. Choose a shorter date range.',\n    Report in ('daily', 'dailymeters', 'dailyresourcemeters') and End - Start > 31d, 'The daily cost report supports up to 31 days. Shorten the range or select another report.',\n    Basis !in ('ActualCost', 'AmortizedCost'), 'Choose Actual cost or Amortized cost.',\n    Report !in ('summary', 'resources', 'meters', 'daily', 'dailymeters', 'resourcemeters', 'dailyresourcemeters', 'tokens'), 'Choose a cost report.',\n    'ready')\n| extend Filter = pack('dimensions', pack('name', 'ResourceType', 'operator', 'In',\n    'values', dynamic(['microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices'])))\n| extend Filter = iff(array_length(Groups) == 0 or set_has_element(Groups, '*'),\n    Filter, pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceGroupName', 'operator', 'In', 'values', Groups)))))\n| extend Filter = iff(AllResources, Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'ResourceId', 'operator', 'In', 'values', SelectedResources)))))\n| extend Meters = dynamic([{CostMeters}])\n| extend Status = case(\n    Status != 'ready', Status,\n    Report != 'tokens' and not(set_has_element(Meters, '*')) and set_has_element(Meters, ''),\n        'The billing meter selection contains a blank value. Refresh the meter picker and select All or a named meter.',\n    'ready')\n| extend Filter = iff(array_length(Meters) == 0 or set_has_element(Meters, '*'), Filter,\n    pack('and', pack_array(Filter, pack('dimensions', pack('name', 'Meter', 'operator', 'In', 'values', Meters)))))\n| extend Grouping = case(\n    Report == 'resources', pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'ServiceName')),\n    Report in ('resourcemeters', 'dailyresourcemeters'), pack_array(pack('type', 'Dimension', 'name', 'ResourceId'), pack('type', 'Dimension', 'name', 'Meter')),\n    Report in ('meters', 'dailymeters'), pack_array(pack('type', 'Dimension', 'name', 'Meter'), pack('type', 'Dimension', 'name', 'MeterSubCategory')),\n    pack_array(pack('type', 'Dimension', 'name', 'ServiceName')))\n| extend Aggregation = iff(Report in ('meters', 'resourcemeters', 'dailyresourcemeters'),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum'), 'totalQuantity', pack('name', 'UsageQuantity', 'function', 'Sum')),\n    pack('totalCost', pack('name', 'Cost', 'function', 'Sum')))\n| extend Body = pack('type', Basis, 'timeframe', 'Custom',\n    'timePeriod', pack('from', '{CostTimeRange:startISO}', 'to', '{CostTimeRange:endISO}'),\n    'dataset', pack('granularity', iff(Report in ('daily', 'dailymeters', 'dailyresourcemeters'), 'Daily', 'None'), 'aggregation', Aggregation,\n        'grouping', Grouping, 'filter', Filter,\n        'sorting', pack_array(pack('direction', 'Descending', 'name', 'Cost'))))\n| extend TokenStatus = case(\n    Status != 'ready', Status,\n    AllResources or array_length(SelectedResources) != 1, 'Token usage requires exactly one Azure OpenAI or Foundry account. Select one AI resource; billing reports support multiple resources.',\n    ResourceType !~ 'microsoft.cognitiveservices/accounts' or ResourceKind !in~ ('OpenAI', 'AIServices'),\n        'Token metrics apply to Azure OpenAI and Foundry model-hosting accounts, not Search or ML workspaces.',\n    Start < ago(93d), 'Platform token metrics retain 93 days. Select a more recent range; older costs remain available in billing reports.',\n    End - Start > 31d, 'Token metrics support a maximum 31-day window here. Select a shorter range.',\n    'ready')\n| extend TokenResource = iff(TokenStatus == 'ready', tostring(SelectedResources[0]), '')\n| extend Export = iff(TokenStatus == 'ready', pack(\n    'resourceName', ResourceName, 'resourceGroup', ResourceGroup,\n    'resourceId', TokenResource,\n    'resourceType', ResourceType, 'resourceKind', ResourceKind, 'resourceRegion', ResourceRegion), dynamic({}))\n| project value = tostring(pack('status', Status, 'tokenStatus', TokenStatus, 'tokenResource', TokenResource,\n    'body', tostring(Body), 'export', Export)), selected = true\n| project value = tostring(parse_json(value).tokenStatus), selected = true",
                   "queryType": 1,
                   "resourceType": "microsoft.resourcegraph/resources",
                   "crossComponentResources": [
@@ -1211,7 +1218,7 @@
           {
             "type": 1,
             "content": {
-              "json": "**Selected:** {CostSubscription:label} | {CostTimeRange:label} | {CostBasis:label} | Meters: {CostMeters:label}. UTC: {CostTimeRange:startISO} to {CostTimeRange:endISO}."
+              "json": "### {CostSubscription:label}\n\n**Selected:** {CostTimeRange:label} | {CostBasis:label} | Meters: {CostMeters:label}. UTC: {CostTimeRange:startISO} to {CostTimeRange:endISO}."
             },
             "name": "cost-window"
           },
@@ -1233,17 +1240,38 @@
           {
             "type": 1,
             "content": {
-              "json": "**Coverage and access:** Costs are daily billing records, can arrive late, and may be\r\nrevised until the invoice closes. This is not the entire application bill: shared\r\nVMs, storage, networking, external providers and Marketplace charges billed to other\r\nresource types are excluded. There is no cross-currency grand total.\r\n\r\nCost Management permission is required on the selected subscription (for example,\r\n**Cost Management Reader**); EA/MCA billing visibility policies can further restrict\r\naccess. A **403** is an access problem, not zero spend. A **429** is throttling: wait\r\nfor the service's retry-after period before refreshing. Only the selected report calls\r\nCost Management; rapid switching or workbook auto-refresh can still hit its limits.\r\n\r\n**Pagination:** Workbook ARM POST queries do not automatically follow Cost Management\r\n`nextLink`. Grids show the first response page, sorted by cost (up to 5,000 rows);\r\nthey are not an exhaustive cost export. Narrow to a resource/group or shorter dates\r\nfor detailed investigations. Download exports only the displayed result.",
+              "json": "**Coverage and access:** Costs are daily billing records, can arrive late, and may be\r\nrevised until the invoice closes. This is not the entire application bill: shared\r\nVMs, storage, networking, external providers and Marketplace charges billed to other\r\nresource types are excluded. There is no cross-currency grand total.\r\n\r\nCost Management permission is required on the selected subscription (for example,\r\n**Cost Management Reader**); EA/MCA billing visibility policies can further restrict\r\naccess. A **403** is an access problem, not zero spend. A **429** is throttling: wait\r\nfor the service's retry-after period before refreshing. Only the selected\r\nsubscription's report and meter picker call Cost Management. Rapid switching or\r\nworkbook auto-refresh can still hit the limits.\r\n\r\n**Pagination:** Workbook ARM POST queries do not automatically follow Cost Management\r\n`nextLink`. Grids show the first response page, sorted by cost (up to 5,000 rows);\r\nthey are not an exhaustive cost export. Narrow to a resource/group or shorter dates\r\nfor detailed investigations. Download exports only the displayed result.",
               "style": "warning"
             },
             "name": "cost-limits"
+          },
+          {
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3,
+            "name": "cost-metadata",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "resources\n| where subscriptionId == '{CostSubscription}'\n| where type in~ ('microsoft.cognitiveservices/accounts', 'microsoft.machinelearningservices/workspaces', 'microsoft.search/searchservices')\n| extend _rgs = dynamic([{ResourceGroups}])\n| where array_length(_rgs) == 0 or set_has_element(_rgs, '*') or set_has_element(_rgs, resourceGroup)\n| project ResourceId = tolower(id), ResourceKind = tostring(kind), Region = location,\n    ResourceSku = tostring(sku.name), ResourceTags = tostring(tags)\n| summarize ResourceKind = take_any(ResourceKind), Region = take_any(Region), ResourceSku = take_any(ResourceSku),\n    ResourceTags = take_any(ResourceTags) by ResourceId\n| project ['Resource ID'] = ResourceId, ['Current kind'] = ResourceKind, ['Current region'] = Region,\n    ['Current SKU'] = ResourceSku, ['Current tags'] = ResourceTags",
+              "size": 0,
+              "title": "Current AI resource metadata",
+              "queryType": 1,
+              "resourceType": "microsoft.resourcegraph/resources",
+              "crossComponentResources": [
+                "{Subscriptions}"
+              ],
+              "showExportToExcel": true
+            }
           },
           {
             "type": 3,
             "name": "cost-summary",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[1]\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[2]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[1]\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[2]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "AI cost by service",
               "queryType": 12,
@@ -1251,6 +1279,21 @@
               "gridSettings": {
                 "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Cost",
@@ -1274,11 +1317,16 @@
             ]
           },
           {
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
             "type": 3,
-            "name": "cost-resources",
+            "name": "cost-resources-billing",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Resource\",\"substringReplace\":\"$1\",\"path\":\"[1]\",\"substringRegexMatch\":\"^.*/([^/]+)$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[3]\"},{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[2]\"},{\"columnType\":\"string\",\"columnid\":\"Subscription\",\"substringReplace\":\"{CostSubscription:label}\",\"path\":\"[1]\",\"substringRegexMatch\":\"^.*$\"},{\"columnType\":\"string\",\"columnid\":\"Resource group\",\"substringReplace\":\"$1\",\"path\":\"[1]\",\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\"},{\"columnType\":\"string\",\"columnid\":\"Resource ID\",\"path\":\"[1]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[1]\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/([^/]+)$\",\"substringReplace\":\"$1\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[3]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[2]\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"$[1]\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\",\"substringReplace\":\"$1\"},{\"path\":\"$[1]\",\"columnid\":\"Resource ID\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"},{\"path\":\"$[1]\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/providers/([^/]+/[^/]+)/.*$\",\"substringReplace\":\"$1\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "AI resource costs - first response page",
               "queryType": 12,
@@ -1286,6 +1334,21 @@
               "gridSettings": {
                 "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Cost",
@@ -1294,6 +1357,44 @@
                 ]
               },
               "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
+            }
+          },
+          {
+            "type": 3,
+            "name": "cost-resources",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"18dae953-270c-41b2-8846-012ef49e66da\",\"mergeType\":\"leftouter\",\"leftTable\":\"cost-resources-billing\",\"rightTable\":\"cost-metadata\",\"leftColumn\":\"Resource ID\",\"rightColumn\":\"Resource ID\"}],\"projectRename\":[{\"originalName\":\"[cost-resources-billing].Resource\",\"mergedName\":\"Resource\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Cost\",\"mergedName\":\"Cost\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Currency\",\"mergedName\":\"Currency\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Service\",\"mergedName\":\"Service\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Resource group\",\"mergedName\":\"Resource group\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Resource ID\",\"mergedName\":\"Resource ID\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Subscription name\",\"mergedName\":\"Subscription name\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Subscription ID\",\"mergedName\":\"Subscription ID\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Period start (UTC)\",\"mergedName\":\"Period start (UTC)\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Period end (UTC)\",\"mergedName\":\"Period end (UTC)\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Cost basis\",\"mergedName\":\"Cost basis\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-resources-billing].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-metadata].Current kind\",\"mergedName\":\"Current kind\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-metadata].Current region\",\"mergedName\":\"Current region\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-metadata].Current SKU\",\"mergedName\":\"Current SKU\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"},{\"originalName\":\"[cost-metadata].Current tags\",\"mergedName\":\"Current tags\",\"fromId\":\"18dae953-270c-41b2-8846-012ef49e66da\"}]}",
+              "size": 2,
+              "title": "AI resource costs - first response page",
+              "queryType": 7,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 5000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Cost",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "noDataMessage": "No billed records returned for this subscription, resource, meter and date selection."
             },
             "conditionalVisibilities": [
               {
@@ -1313,7 +1414,7 @@
             "name": "cost-meters",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Billing meter / token unit\",\"path\":\"[2]\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[4]\"},{\"columnType\":\"string\",\"columnid\":\"Model family / meter subcategory\",\"path\":\"[3]\"},{\"columnType\":\"number\",\"columnid\":\"Quantity in billing units\",\"path\":\"[1]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[2]\",\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[4]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[3]\",\"columnid\":\"Model family / meter subcategory\",\"columnType\":\"string\"},{\"path\":\"$[1]\",\"columnid\":\"Quantity in billing units\",\"columnType\":\"number\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Model and token meter costs - first response page",
               "queryType": 12,
@@ -1321,6 +1422,34 @@
               "gridSettings": {
                 "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "Quantity in billing units",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Cost",
@@ -1348,7 +1477,7 @@
             "name": "cost-daily",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"datetime\",\"columnid\":\"Usage date (UTC)\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\",\"path\":\"[1]\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[3]\"},{\"columnType\":\"string\",\"columnid\":\"Service\",\"path\":\"[2]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[1]\",\"columnid\":\"Usage date (UTC)\",\"columnType\":\"datetime\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[3]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[2]\",\"columnid\":\"Service\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Daily AI costs (UTC)",
               "queryType": 12,
@@ -1356,6 +1485,21 @@
               "gridSettings": {
                 "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Usage date (UTC)",
@@ -1383,7 +1527,7 @@
             "name": "cost-dailymeters",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"columnType\":\"datetime\",\"columnid\":\"Usage date (UTC)\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\",\"path\":\"[1]\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\"},{\"columnType\":\"number\",\"columnid\":\"Cost\",\"path\":\"[0]\"},{\"columnType\":\"string\",\"columnid\":\"Currency\",\"path\":\"[4]\"},{\"columnType\":\"string\",\"columnid\":\"Billing meter / token unit\",\"path\":\"[2]\"},{\"columnType\":\"string\",\"columnid\":\"Model family / meter subcategory\",\"path\":\"[3]\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[1]\",\"columnid\":\"Usage date (UTC)\",\"columnType\":\"datetime\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[4]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[2]\",\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\"},{\"path\":\"$[3]\",\"columnid\":\"Model family / meter subcategory\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"}]}}],\"data\":\"{CostContext:$.body}\"}",
               "size": 2,
               "title": "Daily cost by billing meter (UTC) - first response page",
               "queryType": 12,
@@ -1391,6 +1535,21 @@
               "gridSettings": {
                 "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Usage date (UTC)",
@@ -1414,10 +1573,248 @@
             ]
           },
           {
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3,
+            "name": "cost-resourcemeters-billing",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[2]\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/([^/]+)$\",\"substringReplace\":\"$1\"},{\"path\":\"$[3]\",\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[4]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[1]\",\"columnid\":\"Quantity in billing units\",\"columnType\":\"number\"},{\"path\":\"$[2]\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\",\"substringReplace\":\"$1\"},{\"path\":\"$[2]\",\"columnid\":\"Resource ID\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"},{\"path\":\"$[2]\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/providers/([^/]+/[^/]+)/.*$\",\"substringReplace\":\"$1\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "size": 2,
+              "title": "Resource and model meter costs - first response page",
+              "queryType": 12,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 5000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "Quantity in billing units",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Cost",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
+            }
+          },
+          {
+            "type": 3,
+            "name": "cost-resourcemeters",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\",\"mergeType\":\"leftouter\",\"leftTable\":\"cost-resourcemeters-billing\",\"rightTable\":\"cost-metadata\",\"leftColumn\":\"Resource ID\",\"rightColumn\":\"Resource ID\"}],\"projectRename\":[{\"originalName\":\"[cost-resourcemeters-billing].Resource\",\"mergedName\":\"Resource\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Billing meter / token unit\",\"mergedName\":\"Billing meter / token unit\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Cost\",\"mergedName\":\"Cost\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Currency\",\"mergedName\":\"Currency\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Quantity in billing units\",\"mergedName\":\"Quantity in billing units\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Resource group\",\"mergedName\":\"Resource group\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Resource ID\",\"mergedName\":\"Resource ID\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Subscription name\",\"mergedName\":\"Subscription name\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Subscription ID\",\"mergedName\":\"Subscription ID\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Period start (UTC)\",\"mergedName\":\"Period start (UTC)\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Period end (UTC)\",\"mergedName\":\"Period end (UTC)\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Cost basis\",\"mergedName\":\"Cost basis\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-resourcemeters-billing].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-metadata].Current kind\",\"mergedName\":\"Current kind\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-metadata].Current region\",\"mergedName\":\"Current region\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-metadata].Current SKU\",\"mergedName\":\"Current SKU\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"},{\"originalName\":\"[cost-metadata].Current tags\",\"mergedName\":\"Current tags\",\"fromId\":\"12d1aef3-99a5-448e-9022-d967b5cf5095\"}]}",
+              "size": 2,
+              "title": "Resource and model meter costs - first response page",
+              "queryType": 7,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 5000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "Quantity in billing units",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Cost",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "noDataMessage": "No billed records returned for this subscription, resource, meter and date selection."
+            },
+            "conditionalVisibilities": [
+              {
+                "parameterName": "CostReport",
+                "comparison": "isEqualTo",
+                "value": "resourcemeters"
+              },
+              {
+                "parameterName": "CostStatus",
+                "comparison": "isEqualTo",
+                "value": "ready"
+              }
+            ]
+          },
+          {
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
+            "type": 3,
+            "name": "cost-dailyresourcemeters-billing",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"POST\",\"path\":\"subscriptions/{CostSubscription}/providers/Microsoft.CostManagement/query\",\"headers\":[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"ClientType\",\"value\":\"AzureAIWorkbook\"}],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-11-01\"}],\"batchDisabled\":true,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.properties.rows\",\"columns\":[{\"path\":\"$[2]\",\"columnid\":\"Usage date (UTC)\",\"columnType\":\"datetime\",\"substringRegexMatch\":\"^([0-9]{4})([0-9]{2})([0-9]{2})$\",\"substringReplace\":\"$1-$2-$3T00:00:00Z\"},{\"path\":\"$[3]\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/([^/]+)$\",\"substringReplace\":\"$1\"},{\"path\":\"$[4]\",\"columnid\":\"Billing meter / token unit\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Cost\",\"columnType\":\"number\"},{\"path\":\"$[5]\",\"columnid\":\"Currency\",\"columnType\":\"string\"},{\"path\":\"$[1]\",\"columnid\":\"Quantity in billing units\",\"columnType\":\"number\"},{\"path\":\"$[3]\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^/[^/]+/[^/]+/[^/]+/([^/]+)/.*$\",\"substringReplace\":\"$1\"},{\"path\":\"$[3]\",\"columnid\":\"Resource ID\",\"columnType\":\"string\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"$[0]\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"$[0]\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"$[0]\",\"columnid\":\"Cost basis\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostBasis:label}\"},{\"path\":\"$[3]\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*/providers/([^/]+/[^/]+)/.*$\",\"substringReplace\":\"$1\"}]}}],\"data\":\"{CostContext:$.body}\"}",
+              "size": 2,
+              "title": "Daily resource and model meter costs (UTC) - first response page",
+              "queryType": 12,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 5000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "Quantity in billing units",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Usage date (UTC)",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "noDataMessage": "No billed records returned for this scope and date range. Recent billing may not have arrived; an empty result does not prove zero usage."
+            }
+          },
+          {
+            "type": 3,
+            "name": "cost-dailyresourcemeters",
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\",\"mergeType\":\"leftouter\",\"leftTable\":\"cost-dailyresourcemeters-billing\",\"rightTable\":\"cost-metadata\",\"leftColumn\":\"Resource ID\",\"rightColumn\":\"Resource ID\"}],\"projectRename\":[{\"originalName\":\"[cost-dailyresourcemeters-billing].Usage date (UTC)\",\"mergedName\":\"Usage date (UTC)\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Resource\",\"mergedName\":\"Resource\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Billing meter / token unit\",\"mergedName\":\"Billing meter / token unit\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Cost\",\"mergedName\":\"Cost\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Currency\",\"mergedName\":\"Currency\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Quantity in billing units\",\"mergedName\":\"Quantity in billing units\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Resource group\",\"mergedName\":\"Resource group\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Resource ID\",\"mergedName\":\"Resource ID\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Subscription name\",\"mergedName\":\"Subscription name\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Subscription ID\",\"mergedName\":\"Subscription ID\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Period start (UTC)\",\"mergedName\":\"Period start (UTC)\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Period end (UTC)\",\"mergedName\":\"Period end (UTC)\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Cost basis\",\"mergedName\":\"Cost basis\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-dailyresourcemeters-billing].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-metadata].Current kind\",\"mergedName\":\"Current kind\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-metadata].Current region\",\"mergedName\":\"Current region\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-metadata].Current SKU\",\"mergedName\":\"Current SKU\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"},{\"originalName\":\"[cost-metadata].Current tags\",\"mergedName\":\"Current tags\",\"fromId\":\"4d67737c-074c-48ba-95db-5f6b4beb03aa\"}]}",
+              "size": 2,
+              "title": "Daily resource and model meter costs (UTC) - first response page",
+              "queryType": 7,
+              "showExportToExcel": true,
+              "gridSettings": {
+                "rowLimit": 5000,
+                "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Cost",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  },
+                  {
+                    "columnMatch": "Quantity in billing units",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
+                "sortBy": [
+                  {
+                    "itemKey": "Usage date (UTC)",
+                    "sortOrder": 2
+                  }
+                ]
+              },
+              "noDataMessage": "No billed records returned for this subscription, resource, meter and date selection."
+            },
+            "conditionalVisibilities": [
+              {
+                "parameterName": "CostReport",
+                "comparison": "isEqualTo",
+                "value": "dailyresourcemeters"
+              },
+              {
+                "parameterName": "CostStatus",
+                "comparison": "isEqualTo",
+                "value": "ready"
+              }
+            ]
+          },
+          {
             "type": 1,
             "name": "cost-meter-filter-notes",
             "content": {
-              "json": "**Billing meter filter:** the meter selection applies to every billing report, so\r\n**Cost by service**, **Resource costs** and both daily reports can be narrowed to\r\nspecific models or charge types the same way Cost analysis does. The list contains the\r\nmeters actually billed in the current scope and date range; leaving **All** selected\r\nremoves the filter. It does not apply to token usage, which is a platform metric\r\nrather than a billing dimension. The picker itself issues one extra Cost Management\r\nquery whenever the scope, dates or cost basis change."
+              "json": "**Billing meter filter:** the meter selection applies to every billing report, so\r\n**Cost by service**, **Resource costs** and both daily reports can be narrowed to\r\nspecific models or charge types the same way Cost analysis does. The list contains the\r\nmeters actually billed in the current scope and date range; leaving **All** selected\r\nremoves the filter. It does not apply to token usage, which is a platform metric\r\nrather than a billing dimension. The picker issues one extra Cost Management query\r\nwhenever the scope, dates or cost basis change.\r\n\r\n**Excel analysis:** Every grid carries subscription and period context. Use\r\n**Resource and model meter costs** or **Daily resource and model meter costs** for\r\nresource-level model analysis. Aggregate service/meter reports omit resource detail\r\ncolumns instead of filling them with placeholders. **Current** kind (for example\r\nAIServices/Foundry), region, SKU and tags describe the current resource, not\r\nhistorical billing metadata; they may be empty for deleted/inaccessible resources.\r\nMeter quantities are billing units, not raw tokens. Values display up to two decimals;\r\ntiny charges can display as zero. Native CSV exports retain the underlying numeric\r\nprecision for Excel calculations."
             },
             "conditionalVisibilities": [
               {
@@ -1491,29 +1888,29 @@
             ]
           },
           {
-            "type": 9,
+            "name": "cost-token-parameters",
             "content": {
-              "style": "pills",
               "parameters": [
                 {
-                  "id": "cost-token-family",
+                  "value": "openai",
                   "quote": "",
+                  "label": "Token metric family",
                   "version": "KqlParameterItem/1.0",
-                  "jsonData": "[{\"value\":\"openai\",\"label\":\"Azure OpenAI\"},{\"value\":\"foundry\",\"label\":\"Other Foundry models\"}]",
                   "type": 2,
+                  "isRequired": true,
                   "name": "CostTokenFamily",
                   "typeSettings": {
-                    "showDefault": false,
-                    "additionalResourceOptions": []
+                    "additionalResourceOptions": [],
+                    "showDefault": false
                   },
-                  "isRequired": true,
-                  "label": "Token metric family",
-                  "value": "openai"
+                  "id": "cost-token-family",
+                  "jsonData": "[{\"value\":\"openai\",\"label\":\"Azure OpenAI\"},{\"value\":\"foundry\",\"label\":\"Other Foundry models\"}]"
                 }
               ],
+              "style": "pills",
               "version": "KqlParameterItem/1.0"
             },
-            "name": "cost-token-parameters",
+            "type": 9,
             "conditionalVisibilities": [
               {
                 "parameterName": "CostReport",
@@ -1527,14 +1924,29 @@
             "name": "cost-token-ProcessedPromptTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"ProcessedPromptTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Input tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelVersion\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostContext:$.tokenResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"ProcessedPromptTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\",\"columnid\":\"Deployment\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Input tokens\",\"columnType\":\"number\"},{\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\",\"columnid\":\"ModelVersion\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceName}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceGroup}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceId}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceType}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current kind\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceKind}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current region\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceRegion}\"},{\"path\":\"data[0].total\",\"columnid\":\"Metric name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"ProcessedPromptTokens\"}]}}]}",
               "size": 2,
               "title": "Input tokens by deployment - ProcessedPromptTokens",
               "queryType": 12,
               "showExportToExcel": true,
               "gridSettings": {
-                "rowLimit": 10000,
+                "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Input tokens",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Input tokens",
@@ -1567,14 +1979,29 @@
             "name": "cost-token-GeneratedTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"GeneratedTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Output tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelVersion\",\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostContext:$.tokenResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"GeneratedTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelVersion eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\",\"columnid\":\"Deployment\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Output tokens\",\"columnType\":\"number\"},{\"path\":\"metadatavalues[?(@.name.value == 'modelversion')].value\",\"columnid\":\"ModelVersion\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceName}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceGroup}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceId}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceType}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current kind\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceKind}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current region\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceRegion}\"},{\"path\":\"data[0].total\",\"columnid\":\"Metric name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"GeneratedTokens\"}]}}]}",
               "size": 2,
               "title": "Output tokens by deployment - GeneratedTokens",
               "queryType": 12,
               "showExportToExcel": true,
               "gridSettings": {
-                "rowLimit": 10000,
+                "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Output tokens",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Output tokens",
@@ -1607,14 +2034,29 @@
             "name": "cost-token-InputTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"InputTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Input tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelName\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostContext:$.tokenResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"InputTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\",\"columnid\":\"Deployment\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Input tokens\",\"columnType\":\"number\"},{\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\",\"columnid\":\"ModelName\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceName}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceGroup}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceId}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceType}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current kind\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceKind}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current region\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceRegion}\"},{\"path\":\"data[0].total\",\"columnid\":\"Metric name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"InputTokens\"}]}}]}",
               "size": 2,
               "title": "Input tokens by deployment - InputTokens",
               "queryType": 12,
               "showExportToExcel": true,
               "gridSettings": {
-                "rowLimit": 10000,
+                "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Input tokens",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Input tokens",
@@ -1647,14 +2089,29 @@
             "name": "cost-token-OutputTokens",
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"key\":\"metricnames\",\"value\":\"OutputTokens\"},{\"key\":\"timespan\",\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\"},{\"key\":\"interval\",\"value\":\"FULL\"},{\"key\":\"aggregation\",\"value\":\"Total\"},{\"key\":\"$filter\",\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\"},{\"key\":\"top\",\"value\":\"10000\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"columnType\":\"string\",\"columnid\":\"Deployment\",\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\"},{\"columnType\":\"number\",\"columnid\":\"Output tokens\",\"path\":\"data[0].total\"},{\"columnType\":\"string\",\"columnid\":\"ModelName\",\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\"}]}}]}",
+              "query": "{\"version\":\"ARMEndpoint/1.0\",\"method\":\"GET\",\"path\":\"{CostContext:$.tokenResource}/providers/Microsoft.Insights/metrics\",\"headers\":[],\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2023-10-01\"},{\"value\":\"OutputTokens\",\"key\":\"metricnames\"},{\"value\":\"{CostTimeRange:startISO}/{CostTimeRange:endISO}\",\"key\":\"timespan\"},{\"value\":\"FULL\",\"key\":\"interval\"},{\"value\":\"Total\",\"key\":\"aggregation\"},{\"value\":\"ModelDeploymentName eq '*' and ModelName eq '*'\",\"key\":\"$filter\"},{\"value\":\"10000\",\"key\":\"top\"}],\"batchDisabled\":false,\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"tablePath\":\"$.value[0].timeseries\",\"columns\":[{\"path\":\"metadatavalues[?(@.name.value == 'modeldeploymentname')].value\",\"columnid\":\"Deployment\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Output tokens\",\"columnType\":\"number\"},{\"path\":\"metadatavalues[?(@.name.value == 'modelname')].value\",\"columnid\":\"ModelName\",\"columnType\":\"string\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription:label}\"},{\"path\":\"data[0].total\",\"columnid\":\"Subscription ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostSubscription}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period start (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:startISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Period end (UTC)\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostTimeRange:endISO}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceName}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource group\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceGroup}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource ID\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceId}\"},{\"path\":\"data[0].total\",\"columnid\":\"Resource type\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceType}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current kind\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceKind}\"},{\"path\":\"data[0].total\",\"columnid\":\"Current region\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"{CostContext:$.export.resourceRegion}\"},{\"path\":\"data[0].total\",\"columnid\":\"Metric name\",\"columnType\":\"string\",\"substringRegexMatch\":\"^.*$\",\"substringReplace\":\"OutputTokens\"}]}}]}",
               "size": 2,
               "title": "Output tokens by deployment - OutputTokens",
               "queryType": 12,
               "showExportToExcel": true,
               "gridSettings": {
-                "rowLimit": 10000,
+                "rowLimit": 5000,
                 "filter": true,
+                "formatters": [
+                  {
+                    "columnMatch": "Output tokens",
+                    "numberFormat": {
+                      "unit": 0,
+                      "options": {
+                        "useGrouping": false,
+                        "style": "decimal",
+                        "maximumFractionDigits": 2,
+                        "minimumFractionDigits": 0
+                      }
+                    },
+                    "formatter": 0
+                  }
+                ],
                 "sortBy": [
                   {
                     "itemKey": "Output tokens",
@@ -1718,13 +2175,13 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
+              "exportFieldName": "ResourceId",
+              "exportParameterName": "ModelAccounts",
+              "exportDefaultValue": "",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true
-              },
-              "exportFieldName": "ResourceId",
-              "exportParameterName": "ModelAccounts",
-              "exportDefaultValue": ""
+              }
             },
             "name": "Modelhostingaccountsclickarowtoloaditsdeployments"
           },
@@ -1744,16 +2201,6 @@
               "title": "Model deployments",
               "queryType": 12,
               "showExportToExcel": true,
-              "gridSettings": {
-                "rowLimit": 1000,
-                "filter": true,
-                "sortBy": [
-                  {
-                    "itemKey": "Capacity",
-                    "sortOrder": 2
-                  }
-                ]
-              },
               "exportedParameters": [
                 {
                   "fieldName": "Deployment",
@@ -1785,7 +2232,17 @@
                   "parameterType": 1,
                   "defaultValue": ""
                 }
-              ]
+              ],
+              "gridSettings": {
+                "rowLimit": 1000,
+                "filter": true,
+                "sortBy": [
+                  {
+                    "itemKey": "Capacity",
+                    "sortOrder": 2
+                  }
+                ]
+              }
             },
             "name": "ModelDeployments"
           },
@@ -1799,6 +2256,7 @@
               "title": "Retirement details for the selected deployment",
               "queryType": 12,
               "showExportToExcel": true,
+              "noDataMessage": "No exact regional catalog row was found for the selected deployment.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -1847,8 +2305,7 @@
                     }
                   }
                 ]
-              },
-              "noDataMessage": "No exact regional catalog row was found for the selected deployment."
+              }
             },
             "conditionalVisibilities": [
               {
@@ -2357,6 +2814,11 @@
             "name": "ServiceHealthretirementspastdueandupcoming"
           },
           {
+            "conditionalVisibility": {
+              "parameterName": "selectedTab",
+              "comparison": "isEqualTo",
+              "value": "__internal_never_matches__"
+            },
             "type": 3,
             "name": "AdvisorRetirementMetadataRaw",
             "content": {
@@ -2370,14 +2832,14 @@
                 "rowLimit": 1000,
                 "filter": true
               }
-            },
+            }
+          },
+          {
             "conditionalVisibility": {
               "parameterName": "selectedTab",
               "comparison": "isEqualTo",
               "value": "__internal_never_matches__"
-            }
-          },
-          {
+            },
             "type": 3,
             "name": "AdvisorRetirementResourceCounts",
             "content": {
@@ -2395,22 +2857,26 @@
                 "rowLimit": 1000,
                 "filter": true
               }
-            },
-            "conditionalVisibility": {
-              "parameterName": "selectedTab",
-              "comparison": "isEqualTo",
-              "value": "__internal_never_matches__"
             }
           },
           {
             "type": 3,
             "content": {
               "version": "KqlItem/1.0",
-              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"d98bf1d6-146a-4827-a2c0-6495d35d5a6a\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
+              "query": "{\"version\":\"Merge/1.0\",\"merges\":[{\"id\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\",\"mergeType\":\"leftouter\",\"leftTable\":\"AdvisorRetirementMetadataRaw\",\"rightTable\":\"AdvisorRetirementResourceCounts\",\"leftColumn\":\"Id\",\"rightColumn\":\"ServiceID\"}],\"projectRename\":[{\"originalName\":\"[AdvisorRetirementMetadataRaw].Service\",\"mergedName\":\"Service\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].# Resources\",\"mergedName\":\"# Resources\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement\",\"mergedName\":\"Retirement\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Feature\",\"mergedName\":\"Feature\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Retirement date\",\"mergedName\":\"Retirement date\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Resource type\",\"mergedName\":\"Resource type\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Learn more\",\"mergedName\":\"Learn more\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementMetadataRaw].Id\",\"mergedName\":\"ServiceID\",\"fromId\":\"2b6c62ec-7db8-4036-8d00-6a2b105eb231\"},{\"originalName\":\"[AdvisorRetirementResourceCounts].ServiceID\"}]}",
               "size": 2,
               "title": "Advisor retirements: AI, Data, Network and Infrastructure (past and upcoming)",
               "queryType": 7,
               "showExportToExcel": true,
+              "noDataMessage": "No Advisor retirement metadata matched the selected domains.",
+              "exportedParameters": [
+                {
+                  "fieldName": "ServiceID",
+                  "parameterName": "SelectedRetirementServiceId",
+                  "parameterType": 1,
+                  "defaultValue": ""
+                }
+              ],
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -2489,16 +2955,7 @@
                     "sortOrder": 2
                   }
                 ]
-              },
-              "exportedParameters": [
-                {
-                  "fieldName": "ServiceID",
-                  "parameterName": "SelectedRetirementServiceId",
-                  "parameterType": 1,
-                  "defaultValue": ""
-                }
-              ],
-              "noDataMessage": "No Advisor retirement metadata matched the selected domains."
+              }
             },
             "name": "AdvisorRetirementSummary"
           },
@@ -2516,6 +2973,7 @@
                 "{Subscriptions}"
               ],
               "showExportToExcel": true,
+              "noDataMessage": "No affected resources were found for the selected retirement in the current scope.",
               "gridSettings": {
                 "rowLimit": 1000,
                 "filter": true,
@@ -2532,8 +2990,7 @@
                     }
                   }
                 ]
-              },
-              "noDataMessage": "No affected resources were found for the selected retirement in the current scope."
+              }
             },
             "conditionalVisibilities": [
               {
