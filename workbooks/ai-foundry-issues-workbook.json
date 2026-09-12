@@ -203,12 +203,12 @@
         "style": "tabs",
         "links": [
           {
-            "subTarget": "fleetRetirementV2",
-            "cellValue": "selectedTab",
-            "linkTarget": "parameter",
             "id": "v2-fleet-tab",
+            "cellValue": "selectedTab",
             "style": "link",
-            "linkLabel": "Fleet retirement (v2)"
+            "linkTarget": "parameter",
+            "linkLabel": "Fleet retirement (v2)",
+            "subTarget": "fleetRetirementV2"
           },
           {
             "id": "t1",
@@ -3534,172 +3534,177 @@
       "name": "group-about"
     },
     {
+      "type": 12,
+      "conditionalVisibility": {
+        "value": "fleetRetirementV2",
+        "comparison": "isEqualTo",
+        "parameterName": "selectedTab"
+      },
       "content": {
-        "version": "NotebookGroup/1.0",
         "loadType": "lazy",
+        "version": "NotebookGroup/1.0",
         "items": [
           {
+            "type": 1,
             "content": {
               "json": "## Fleet deployment retirement\r\n\r\nSelect accounts, then choose **Load retirement data**."
             },
-            "type": 1,
             "name": "v2-fleet-intro"
           },
           {
+            "type": 9,
             "content": {
-              "version": "KqlParameterItem/1.0",
               "parameters": [
                 {
-                  "isRequired": true,
+                  "type": 2,
+                  "name": "FleetAccounts",
+                  "delimiter": ",",
+                  "query": "resources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| project value=tolower(id), label=strcat(name, ' [', kind, ' / ', location, ']'), selected=false\r\n| order by label asc",
+                  "resourceType": "microsoft.resourcegraph/resources",
+                  "version": "KqlParameterItem/1.0",
+                  "multiSelect": true,
+                  "queryType": 1,
+                  "typeSettings": {
+                    "selectAllValue": "*",
+                    "showDefault": false,
+                    "additionalResourceOptions": [
+                      "value::all"
+                    ]
+                  },
                   "value": [
                     "value::all"
                   ],
-                  "delimiter": ",",
                   "quote": "'",
-                  "resourceType": "microsoft.resourcegraph/resources",
-                  "typeSettings": {
-                    "additionalResourceOptions": [
-                      "value::all"
-                    ],
-                    "showDefault": false,
-                    "selectAllValue": "*"
-                  },
-                  "type": 2,
-                  "id": "FleetAccounts",
-                  "crossComponentResources": [
-                    "{Subscriptions}"
-                  ],
-                  "queryType": 1,
                   "label": "Fleet accounts",
-                  "multiSelect": true,
-                  "name": "FleetAccounts",
-                  "query": "resources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| project value=tolower(id), label=strcat(name, ' [', kind, ' / ', location, ']'), selected=false\r\n| order by label asc",
-                  "version": "KqlParameterItem/1.0"
+                  "id": "FleetAccounts",
+                  "isRequired": true,
+                  "crossComponentResources": [
+                    "{Subscriptions}"
+                  ]
                 },
                 {
-                  "version": "KqlParameterItem/1.0",
-                  "isHiddenWhenLocked": true,
-                  "resourceType": "microsoft.resourcegraph/resources",
-                  "id": "FleetContext",
+                  "queryType": 1,
                   "crossComponentResources": [
                     "{Subscriptions}"
                   ],
-                  "type": 1,
+                  "resourceType": "microsoft.resourcegraph/resources",
+                  "version": "KqlParameterItem/1.0",
+                  "query": "resources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| summarize available=make_set(tolower(id))\r\n| extend requested=dynamic([{FleetAccounts}])\r\n| extend allSelected=array_length(requested)==1 and tostring(requested[0])=='*'\r\n| extend status=case(\r\n    array_length(requested)==0, 'Select one or more model-hosting accounts.',\r\n    set_has_element(requested, '*') and not(allSelected), 'Select All on its own, or select individual accounts.',\r\n    not(allSelected) and array_length(set_difference(requested, available))>0, 'Some selected accounts are outside the current scope. Reselect the accounts.',\r\n    array_length(available)==0, 'No Foundry/OpenAI accounts are available in this scope.',\r\n    'ready')\r\n| project value=tostring(pack('status', status, 'accounts', iff(allSelected, array_length(available), array_length(requested)))), selected=true",
                   "name": "FleetContext",
-                  "queryType": 1,
-                  "query": "resources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| summarize available=make_set(tolower(id))\r\n| extend requested=dynamic([{FleetAccounts}])\r\n| extend allSelected=array_length(requested)==1 and tostring(requested[0])=='*'\r\n| extend status=case(\r\n    array_length(requested)==0, 'Select one or more model-hosting accounts.',\r\n    set_has_element(requested, '*') and not(allSelected), 'Select All on its own, or select individual accounts.',\r\n    not(allSelected) and array_length(set_difference(requested, available))>0, 'Some selected accounts are outside the current scope. Reselect the accounts.',\r\n    array_length(available)==0, 'No Foundry/OpenAI accounts are available in this scope.',\r\n    'ready')\r\n| project value=tostring(pack('status', status, 'accounts', iff(allSelected, array_length(available), array_length(requested)))), selected=true"
+                  "id": "FleetContext",
+                  "isHiddenWhenLocked": true,
+                  "type": 1
                 },
                 {
-                  "criteriaData": [
-                    {
-                      "criteriaContext": {
-                        "resultValType": "static",
-                        "operator": "Default",
-                        "resultVal": "{FleetContext:$.status}"
-                      }
-                    }
-                  ],
-                  "isHiddenWhenLocked": true,
-                  "type": 1,
                   "id": "FleetStatus",
+                  "isHiddenWhenLocked": true,
+                  "type": 1,
                   "version": "KqlParameterItem/1.0",
-                  "name": "FleetStatus"
-                },
-                {
+                  "name": "FleetStatus",
                   "criteriaData": [
                     {
                       "criteriaContext": {
-                        "resultValType": "static",
                         "operator": "Default",
-                        "resultVal": "{Subscriptions}|{ResourceGroups}|{FleetAccounts}"
+                        "resultVal": "{FleetContext:$.status}",
+                        "resultValType": "static"
                       }
                     }
-                  ],
-                  "isHiddenWhenLocked": true,
-                  "type": 1,
-                  "id": "FleetScopeKey",
-                  "version": "KqlParameterItem/1.0",
-                  "name": "FleetScopeKey"
+                  ]
                 },
                 {
+                  "id": "FleetScopeKey",
+                  "isHiddenWhenLocked": true,
+                  "type": 1,
+                  "version": "KqlParameterItem/1.0",
+                  "name": "FleetScopeKey",
+                  "criteriaData": [
+                    {
+                      "criteriaContext": {
+                        "operator": "Default",
+                        "resultVal": "{Subscriptions}|{ResourceGroups}|{FleetAccounts}",
+                        "resultValType": "static"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "value": "",
+                  "id": "FleetLoadedScope",
                   "isHiddenWhenLocked": true,
                   "isGlobal": true,
                   "type": 1,
-                  "id": "FleetLoadedScope",
                   "version": "KqlParameterItem/1.0",
-                  "value": "",
                   "name": "FleetLoadedScope"
                 },
                 {
+                  "id": "FleetReady",
+                  "isHiddenWhenLocked": true,
+                  "type": 1,
+                  "version": "KqlParameterItem/1.0",
+                  "name": "FleetReady",
                   "criteriaData": [
                     {
                       "criteriaContext": {
-                        "resultValType": "static",
-                        "resultVal": "pending",
                         "operator": "is Empty",
-                        "leftOperand": "FleetLoadedScope"
-                      }
-                    },
-                    {
-                      "criteriaContext": {
-                        "resultValType": "static",
-                        "operator": "==",
-                        "resultVal": "ready",
-                        "rightVal": "FleetScopeKey",
+                        "resultVal": "pending",
                         "leftOperand": "FleetLoadedScope",
-                        "rightValType": "param"
+                        "resultValType": "static"
                       }
                     },
                     {
                       "criteriaContext": {
+                        "operator": "==",
+                        "leftOperand": "FleetLoadedScope",
+                        "rightValType": "param",
                         "resultValType": "static",
+                        "rightVal": "FleetScopeKey",
+                        "resultVal": "ready"
+                      }
+                    },
+                    {
+                      "criteriaContext": {
                         "operator": "Default",
-                        "resultVal": "pending"
+                        "resultVal": "pending",
+                        "resultValType": "static"
                       }
                     }
-                  ],
-                  "isHiddenWhenLocked": true,
-                  "type": 1,
-                  "id": "FleetReady",
-                  "version": "KqlParameterItem/1.0",
-                  "name": "FleetReady"
+                  ]
                 }
               ],
+              "version": "KqlParameterItem/1.0",
               "style": "pills"
             },
-            "type": 9,
             "name": "v2-fleet-controls"
           },
           {
-            "content": {
-              "json": "{FleetContext:$.status}",
-              "style": "warning"
-            },
             "type": 1,
             "conditionalVisibility": {
               "value": "ready",
               "comparison": "isNotEqualTo",
               "parameterName": "FleetStatus"
             },
+            "content": {
+              "style": "warning",
+              "json": "{FleetContext:$.status}"
+            },
             "name": "v2-selection-error"
           },
           {
+            "type": 11,
             "content": {
               "links": [
                 {
-                  "subTarget": "{FleetScopeKey}",
-                  "cellValue": "FleetLoadedScope",
-                  "linkTarget": "parameter",
                   "id": "v2-load-action",
+                  "cellValue": "FleetLoadedScope",
                   "style": "primary",
-                  "linkLabel": "Load retirement data"
+                  "linkTarget": "parameter",
+                  "linkLabel": "Load retirement data",
+                  "subTarget": "{FleetScopeKey}"
                 }
               ],
               "version": "LinkItem/1.0",
               "style": "toolbar"
             },
-            "type": 11,
-            "name": "v2-load",
             "conditionalVisibilities": [
               {
                 "value": "ready",
@@ -3711,268 +3716,268 @@
                 "comparison": "isEqualTo",
                 "parameterName": "FleetStatus"
               }
-            ]
+            ],
+            "name": "v2-load"
           },
           {
-            "content": {
-              "links": [
-                {
-                  "subTarget": "",
-                  "cellValue": "FleetLoadedScope",
-                  "linkTarget": "parameter",
-                  "id": "v2-unload-action",
-                  "style": "secondary",
-                  "linkLabel": "Unload results"
-                }
-              ],
-              "version": "LinkItem/1.0",
-              "style": "toolbar"
-            },
             "type": 11,
             "conditionalVisibility": {
               "value": "ready",
               "comparison": "isEqualTo",
               "parameterName": "FleetReady"
             },
+            "content": {
+              "links": [
+                {
+                  "id": "v2-unload-action",
+                  "cellValue": "FleetLoadedScope",
+                  "style": "primary",
+                  "linkTarget": "parameter",
+                  "linkLabel": "Unload results",
+                  "subTarget": ""
+                }
+              ],
+              "version": "LinkItem/1.0",
+              "style": "toolbar"
+            },
             "name": "v2-unload"
           },
           {
+            "type": 12,
             "content": {
-              "version": "NotebookGroup/1.0",
               "loadType": "lazy",
+              "version": "NotebookGroup/1.0",
               "items": [
                 {
+                  "type": 15,
                   "content": {
+                    "queryType": 1,
                     "crossComponentResources": [
                       "{Subscriptions}"
                     ],
-                    "query": "// V2_ACCOUNT_SCOPE\r\nresources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| where \"{FleetLoadedScope:escapejson}\" != \"\" and \"{FleetLoadedScope:escapejson}\" == \"{FleetScopeKey:escapejson}\" and \"{FleetStatus:escapejson}\" == \"ready\"\r\n| extend _accounts=dynamic([{FleetAccounts}])\r\n| where set_has_element(_accounts, '*') or set_has_element(_accounts, tolower(id))\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | where type =~ 'microsoft.resources/subscriptions'\r\n    | project subscriptionId, subscriptionName=name\r\n) on subscriptionId\r\n| project hostId=tolower(id), accountName=name, accountKind=kind, region=location,\r\n    subscriptionId, subscriptionName, resourceGroup,\r\n    observedAt=tostring(now()),\r\n    runId=strcat('00000000-0000-4000-8000-', format_datetime(now(), 'yyMMddHHmmss'))\r\n| order by hostId asc",
                     "resourceType": "microsoft.resourcegraph/resources",
-                    "size": 2,
                     "version": "KqlItem/1.0",
-                    "queryType": 1
+                    "size": 2,
+                    "query": "// V2_ACCOUNT_SCOPE\r\nresources\r\n| where type =~ 'microsoft.cognitiveservices/accounts'\r\n| where kind in~ ('OpenAI', 'AIServices')\r\n| extend _groups=dynamic([{ResourceGroups}])\r\n| where array_length(_groups)==0 or set_has_element(_groups, '*') or set_has_element(_groups, resourceGroup)\r\n| where \"{FleetLoadedScope:escapejson}\" != \"\" and \"{FleetLoadedScope:escapejson}\" == \"{FleetScopeKey:escapejson}\" and \"{FleetStatus:escapejson}\" == \"ready\"\r\n| extend _accounts=dynamic([{FleetAccounts}])\r\n| where set_has_element(_accounts, '*') or set_has_element(_accounts, tolower(id))\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | where type =~ 'microsoft.resources/subscriptions'\r\n    | project subscriptionId, subscriptionName=name\r\n) on subscriptionId\r\n| project hostId=tolower(id), accountName=name, accountKind=kind, region=location,\r\n    subscriptionId, subscriptionName, resourceGroup,\r\n    observedAt=tostring(now()),\r\n    runId=strcat('00000000-0000-4000-8000-', format_datetime(now(), 'yyMMddHHmmss'))\r\n| order by hostId asc"
                   },
-                  "type": 15,
                   "name": "FleetAccountScope"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"accountName\\\":\\\"s:{accountName:escapejson}\\\",\\\"accountKind\\\":\\\"s:{accountKind:escapejson}\\\",\\\"region\\\":\\\"s:{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"s:{subscriptionId:escapejson}\\\",\\\"subscriptionName\\\":\\\"s:{subscriptionName:escapejson}\\\",\\\"resourceGroup\\\":\\\"s:{resourceGroup:escapejson}\\\",\\\"observedAt\\\":\\\"s:{observedAt:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\"}}]\",\"version\":\"1.0.0\"}",
-                    "queryType": 8,
-                    "dataSourceId": "FleetAccountScope"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"accountName\\\":\\\"s:{accountName:escapejson}\\\",\\\"accountKind\\\":\\\"s:{accountKind:escapejson}\\\",\\\"region\\\":\\\"s:{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"s:{subscriptionId:escapejson}\\\",\\\"subscriptionName\\\":\\\"s:{subscriptionName:escapejson}\\\",\\\"resourceGroup\\\":\\\"s:{resourceGroup:escapejson}\\\",\\\"observedAt\\\":\\\"s:{observedAt:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\"}}]\",\"version\":\"1.0.0\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetAccountScope",
+                    "queryType": 8
+                  },
                   "name": "FleetAccountPacking"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"content\":\"[{\\\"hostId\\\":\\\"{hostId:escapejson}\\\",\\\"accountKind\\\":\\\"{accountKind:escapejson}\\\",\\\"region\\\":\\\"{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"{subscriptionId:escapejson}\\\",\\\"runId\\\":\\\"{runId:escapejson}\\\",\\\"deploymentId\\\":\\\"\\\",\\\"deploymentName\\\":\\\"\\\",\\\"modelName\\\":\\\"\\\",\\\"modelVersion\\\":\\\"\\\",\\\"modelFormat\\\":\\\"\\\",\\\"deploymentSku\\\":\\\"\\\",\\\"capacity\\\":\\\"\\\",\\\"upgradePolicy\\\":\\\"\\\",\\\"provisioningState\\\":\\\"\\\",\\\"lifecycle\\\":\\\"\\\",\\\"inferenceDate\\\":\\\"\\\",\\\"fineTuneDate\\\":\\\"\\\",\\\"skuMatches\\\":\\\"\\\",\\\"catalogPath\\\":\\\"{hostId:escapejson}/deployments\\\"}]\",\"version\":\"1.0.0\"}",
-                    "queryType": 8,
-                    "dataSourceId": "FleetAccountScope"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"content\":\"[{\\\"hostId\\\":\\\"{hostId:escapejson}\\\",\\\"accountKind\\\":\\\"{accountKind:escapejson}\\\",\\\"region\\\":\\\"{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"{subscriptionId:escapejson}\\\",\\\"runId\\\":\\\"{runId:escapejson}\\\",\\\"deploymentId\\\":\\\"\\\",\\\"deploymentName\\\":\\\"\\\",\\\"modelName\\\":\\\"\\\",\\\"modelVersion\\\":\\\"\\\",\\\"modelFormat\\\":\\\"\\\",\\\"deploymentSku\\\":\\\"\\\",\\\"capacity\\\":\\\"\\\",\\\"upgradePolicy\\\":\\\"\\\",\\\"provisioningState\\\":\\\"\\\",\\\"lifecycle\\\":\\\"\\\",\\\"inferenceDate\\\":\\\"\\\",\\\"fineTuneDate\\\":\\\"\\\",\\\"skuMatches\\\":\\\"\\\",\\\"catalogPath\\\":\\\"{hostId:escapejson}/deployments\\\"}]\",\"version\":\"1.0.0\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetAccountScope",
+                    "queryType": 8
+                  },
                   "name": "FleetControlRows"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"batchDisabled\":true,\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"method\":\"GETARRAY\",\"transformers\":[{\"settings\":{\"columns\":[{\"columnid\":\"deploymentId\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"columnid\":\"deploymentName\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"hostId\",\"substringReplace\":\"{hostId}\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"accountKind\",\"substringReplace\":\"{accountKind}\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"region\",\"substringReplace\":\"{region}\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"subscriptionId\",\"substringReplace\":\"{subscriptionId}\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"runId\",\"substringReplace\":\"{runId}\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"catalogPath\",\"substringReplace\":\"subscriptions/{subscriptionId}/providers/Microsoft.CognitiveServices/locations/{region}/models\",\"path\":\"$.id\",\"columnType\":\"string\"},{\"columnid\":\"modelName\",\"path\":\"$.properties.model.name\",\"columnType\":\"string\"},{\"columnid\":\"modelVersion\",\"path\":\"$.properties.model.version\",\"columnType\":\"string\"},{\"columnid\":\"modelFormat\",\"path\":\"$.properties.model.format\",\"columnType\":\"string\"},{\"columnid\":\"deploymentSku\",\"path\":\"$.sku.name\",\"columnType\":\"string\"},{\"columnid\":\"capacity\",\"path\":\"$.sku.capacity\",\"columnType\":\"string\"},{\"columnid\":\"upgradePolicy\",\"path\":\"$.properties.versionUpgradeOption\",\"columnType\":\"string\"},{\"columnid\":\"provisioningState\",\"path\":\"$.properties.provisioningState\",\"columnType\":\"string\"}],\"tablePath\":\"$[*]\"},\"type\":\"jsonpath\"}],\"version\":\"ARMEndpoint/1.0\",\"path\":\"{hostId}/deployments\",\"headers\":[{\"name\":\"x-ms-client-request-id\",\"value\":\"{runId}\"}]}",
-                    "queryType": 12,
-                    "dataSourceId": "FleetAccountScope"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"batchDisabled\":true,\"headers\":[{\"name\":\"x-ms-client-request-id\",\"value\":\"{runId}\"}],\"path\":\"{hostId}/deployments\",\"version\":\"ARMEndpoint/1.0\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"columns\":[{\"columnType\":\"string\",\"columnid\":\"deploymentId\",\"path\":\"$.id\"},{\"columnType\":\"string\",\"columnid\":\"deploymentName\",\"path\":\"$.name\"},{\"columnType\":\"string\",\"columnid\":\"hostId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"{hostId}\"},{\"columnType\":\"string\",\"columnid\":\"accountKind\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"{accountKind}\"},{\"columnType\":\"string\",\"columnid\":\"region\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"{region}\"},{\"columnType\":\"string\",\"columnid\":\"subscriptionId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"{subscriptionId}\"},{\"columnType\":\"string\",\"columnid\":\"runId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"{runId}\"},{\"columnType\":\"string\",\"columnid\":\"catalogPath\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.id\",\"substringReplace\":\"subscriptions/{subscriptionId}/providers/Microsoft.CognitiveServices/locations/{region}/models\"},{\"columnType\":\"string\",\"columnid\":\"modelName\",\"path\":\"$.properties.model.name\"},{\"columnType\":\"string\",\"columnid\":\"modelVersion\",\"path\":\"$.properties.model.version\"},{\"columnType\":\"string\",\"columnid\":\"modelFormat\",\"path\":\"$.properties.model.format\"},{\"columnType\":\"string\",\"columnid\":\"deploymentSku\",\"path\":\"$.sku.name\"},{\"columnType\":\"string\",\"columnid\":\"capacity\",\"path\":\"$.sku.capacity\"},{\"columnType\":\"string\",\"columnid\":\"upgradePolicy\",\"path\":\"$.properties.versionUpgradeOption\"},{\"columnType\":\"string\",\"columnid\":\"provisioningState\",\"path\":\"$.properties.provisioningState\"}],\"tablePath\":\"$[*]\"}}],\"method\":\"GETARRAY\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetAccountScope",
+                    "queryType": 12
+                  },
                   "name": "FleetDeployments"
                 },
                 {
+                  "type": 15,
                   "content": {
+                    "query": "{\"merges\":[{\"rightTable\":\"FleetControlRows\",\"leftTable\":\"FleetDeployments\",\"id\":\"FleetDeploymentWorklist-union\",\"mergeType\":\"union\"}],\"version\":\"Merge/1.0\"}",
                     "version": "KqlItem/1.0",
-                    "query": "{\"merges\":[{\"mergeType\":\"union\",\"leftTable\":\"FleetDeployments\",\"rightTable\":\"FleetControlRows\",\"id\":\"FleetDeploymentWorklist-union\"}],\"version\":\"Merge/1.0\"}",
                     "queryType": 7
                   },
-                  "type": 15,
                   "name": "FleetDeploymentWorklist"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"deploymentId\\\":\\\"s:{deploymentId:escapejson}\\\",\\\"deploymentName\\\":\\\"s:{deploymentName:escapejson}\\\",\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"modelName\\\":\\\"s:{modelName:escapejson}\\\",\\\"modelVersion\\\":\\\"s:{modelVersion:escapejson}\\\",\\\"modelFormat\\\":\\\"s:{modelFormat:escapejson}\\\",\\\"deploymentSku\\\":\\\"s:{deploymentSku:escapejson}\\\",\\\"capacity\\\":\\\"s:{capacity:escapejson}\\\",\\\"upgradePolicy\\\":\\\"s:{upgradePolicy:escapejson}\\\",\\\"provisioningState\\\":\\\"s:{provisioningState:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\"}}]\",\"version\":\"1.0.0\"}",
-                    "queryType": 8,
-                    "dataSourceId": "FleetDeploymentWorklist"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"deploymentId\\\":\\\"s:{deploymentId:escapejson}\\\",\\\"deploymentName\\\":\\\"s:{deploymentName:escapejson}\\\",\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"modelName\\\":\\\"s:{modelName:escapejson}\\\",\\\"modelVersion\\\":\\\"s:{modelVersion:escapejson}\\\",\\\"modelFormat\\\":\\\"s:{modelFormat:escapejson}\\\",\\\"deploymentSku\\\":\\\"s:{deploymentSku:escapejson}\\\",\\\"capacity\\\":\\\"s:{capacity:escapejson}\\\",\\\"upgradePolicy\\\":\\\"s:{upgradePolicy:escapejson}\\\",\\\"provisioningState\\\":\\\"s:{provisioningState:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\"}}]\",\"version\":\"1.0.0\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetDeploymentWorklist",
+                    "queryType": 8
+                  },
                   "name": "FleetDeploymentPacking"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"batchDisabled\":true,\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"method\":\"GETARRAY\",\"transformers\":[{\"settings\":{\"columns\":[{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"deploymentId\",\"substringReplace\":\"{deploymentId}\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"hostId\",\"substringReplace\":\"{hostId}\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"runId\",\"substringReplace\":\"{runId}\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"region\",\"substringReplace\":\"{region}\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"substringRegexMatch\":\"^.*$\",\"columnid\":\"subscriptionId\",\"substringReplace\":\"{subscriptionId}\",\"path\":\"$.name\",\"columnType\":\"string\"},{\"columnid\":\"accountKind\",\"path\":\"$.kind\",\"columnType\":\"string\"},{\"columnid\":\"modelName\",\"path\":\"$.model.name\",\"columnType\":\"string\"},{\"columnid\":\"modelVersion\",\"path\":\"$.model.version\",\"columnType\":\"string\"},{\"columnid\":\"modelFormat\",\"path\":\"$.model.format\",\"columnType\":\"string\"},{\"columnid\":\"lifecycle\",\"path\":\"$.model.lifecycleStatus\",\"columnType\":\"string\"},{\"columnid\":\"inferenceDate\",\"path\":\"$.model.deprecation.inference\",\"columnType\":\"string\"},{\"columnid\":\"fineTuneDate\",\"path\":\"$.model.deprecation.fineTune\",\"columnType\":\"string\"},{\"path\":\"$.model.skus[?(@.name == \\\"{deploymentSku:escapejson}\\\")]\",\"columnid\":\"skuMatches\"}],\"tablePath\":\"$[?(\\\"{modelName:escapejson}\\\" != \\\"\\\" && \\\"{modelVersion:escapejson}\\\" != \\\"\\\" && \\\"{modelFormat:escapejson}\\\" != \\\"\\\" && @.kind == \\\"{accountKind:escapejson}\\\" && @.model.format == \\\"{modelFormat:escapejson}\\\" && @.model.name == \\\"{modelName:escapejson}\\\" && @.model.version == \\\"{modelVersion:escapejson}\\\")]\"},\"type\":\"jsonpath\"}],\"version\":\"ARMEndpoint/1.0\",\"path\":\"{catalogPath}\",\"headers\":[{\"name\":\"x-ms-client-request-id\",\"value\":\"{runId}\"}]}",
-                    "queryType": 12,
-                    "dataSourceId": "FleetDeploymentWorklist"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"urlParams\":[{\"key\":\"api-version\",\"value\":\"2024-10-01\"}],\"batchDisabled\":true,\"headers\":[{\"name\":\"x-ms-client-request-id\",\"value\":\"{runId}\"}],\"path\":\"{catalogPath}\",\"version\":\"ARMEndpoint/1.0\",\"transformers\":[{\"type\":\"jsonpath\",\"settings\":{\"columns\":[{\"columnType\":\"string\",\"columnid\":\"deploymentId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.name\",\"substringReplace\":\"{deploymentId}\"},{\"columnType\":\"string\",\"columnid\":\"hostId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.name\",\"substringReplace\":\"{hostId}\"},{\"columnType\":\"string\",\"columnid\":\"runId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.name\",\"substringReplace\":\"{runId}\"},{\"columnType\":\"string\",\"columnid\":\"region\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.name\",\"substringReplace\":\"{region}\"},{\"columnType\":\"string\",\"columnid\":\"subscriptionId\",\"substringRegexMatch\":\"^.*$\",\"path\":\"$.name\",\"substringReplace\":\"{subscriptionId}\"},{\"columnType\":\"string\",\"columnid\":\"accountKind\",\"path\":\"$.kind\"},{\"columnType\":\"string\",\"columnid\":\"modelName\",\"path\":\"$.model.name\"},{\"columnType\":\"string\",\"columnid\":\"modelVersion\",\"path\":\"$.model.version\"},{\"columnType\":\"string\",\"columnid\":\"modelFormat\",\"path\":\"$.model.format\"},{\"columnType\":\"string\",\"columnid\":\"lifecycle\",\"path\":\"$.model.lifecycleStatus\"},{\"columnType\":\"string\",\"columnid\":\"inferenceDate\",\"path\":\"$.model.deprecation.inference\"},{\"columnType\":\"string\",\"columnid\":\"fineTuneDate\",\"path\":\"$.model.deprecation.fineTune\"},{\"path\":\"$.model.skus[?(@.name == \\\"{deploymentSku:escapejson}\\\")]\",\"columnid\":\"skuMatches\"}],\"tablePath\":\"$[?(\\\"{modelName:escapejson}\\\" != \\\"\\\" && \\\"{modelVersion:escapejson}\\\" != \\\"\\\" && \\\"{modelFormat:escapejson}\\\" != \\\"\\\" && @.kind == \\\"{accountKind:escapejson}\\\" && @.model.format == \\\"{modelFormat:escapejson}\\\" && @.model.name == \\\"{modelName:escapejson}\\\" && @.model.version == \\\"{modelVersion:escapejson}\\\")]\"}}],\"method\":\"GETARRAY\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetDeploymentWorklist",
+                    "queryType": 12
+                  },
                   "name": "FleetCatalogMatches"
                 },
                 {
+                  "type": 15,
                   "content": {
+                    "query": "{\"merges\":[{\"rightTable\":\"FleetControlRows\",\"leftTable\":\"FleetCatalogMatches\",\"id\":\"FleetCatalogWorklist-union\",\"mergeType\":\"union\"}],\"version\":\"Merge/1.0\"}",
                     "version": "KqlItem/1.0",
-                    "query": "{\"merges\":[{\"mergeType\":\"union\",\"leftTable\":\"FleetCatalogMatches\",\"rightTable\":\"FleetControlRows\",\"id\":\"FleetCatalogWorklist-union\"}],\"version\":\"Merge/1.0\"}",
                     "queryType": 7
                   },
-                  "type": 15,
                   "name": "FleetCatalogWorklist"
                 },
                 {
-                  "content": {
-                    "version": "NotebookDataRepeater/1.0",
-                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"deploymentId\\\":\\\"s:{deploymentId:escapejson}\\\",\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"region\\\":\\\"s:{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"s:{subscriptionId:escapejson}\\\",\\\"accountKind\\\":\\\"s:{accountKind:escapejson}\\\",\\\"modelName\\\":\\\"s:{modelName:escapejson}\\\",\\\"modelVersion\\\":\\\"s:{modelVersion:escapejson}\\\",\\\"modelFormat\\\":\\\"s:{modelFormat:escapejson}\\\",\\\"lifecycle\\\":\\\"s:{lifecycle:escapejson}\\\",\\\"inferenceDate\\\":\\\"s:{inferenceDate:escapejson}\\\",\\\"fineTuneDate\\\":\\\"s:{fineTuneDate:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\",\\\"skuMatchesJson\\\":\\\"[{skuMatches:escapejson}]\\\"}}]\",\"version\":\"1.0.0\"}",
-                    "queryType": 8,
-                    "dataSourceId": "FleetCatalogWorklist"
-                  },
                   "type": 14,
+                  "content": {
+                    "query": "{\"content\":\"[{\\\"value\\\":{\\\"deploymentId\\\":\\\"s:{deploymentId:escapejson}\\\",\\\"hostId\\\":\\\"s:{hostId:escapejson}\\\",\\\"region\\\":\\\"s:{region:escapejson}\\\",\\\"subscriptionId\\\":\\\"s:{subscriptionId:escapejson}\\\",\\\"accountKind\\\":\\\"s:{accountKind:escapejson}\\\",\\\"modelName\\\":\\\"s:{modelName:escapejson}\\\",\\\"modelVersion\\\":\\\"s:{modelVersion:escapejson}\\\",\\\"modelFormat\\\":\\\"s:{modelFormat:escapejson}\\\",\\\"lifecycle\\\":\\\"s:{lifecycle:escapejson}\\\",\\\"inferenceDate\\\":\\\"s:{inferenceDate:escapejson}\\\",\\\"fineTuneDate\\\":\\\"s:{fineTuneDate:escapejson}\\\",\\\"runId\\\":\\\"s:{runId:escapejson}\\\",\\\"skuMatchesJson\\\":\\\"[{skuMatches:escapejson}]\\\"}}]\",\"version\":\"1.0.0\"}",
+                    "version": "NotebookDataRepeater/1.0",
+                    "dataSourceId": "FleetCatalogWorklist",
+                    "queryType": 8
+                  },
                   "name": "FleetCatalogPacking"
                 },
                 {
+                  "type": 9,
                   "content": {
-                    "version": "KqlParameterItem/1.0",
                     "parameters": [
                       {
-                        "isRequired": false,
-                        "value": [
-                          "value::all"
-                        ],
-                        "delimiter": ",",
-                        "quote": "",
-                        "typeSettings": {
-                          "showDefault": false,
-                          "additionalResourceOptions": [
-                            "value::all"
-                          ]
-                        },
                         "type": 2,
-                        "id": "FleetAccountPayloads",
-                        "isHiddenWhenLocked": true,
-                        "queryType": 7,
-                        "multiSelect": true,
                         "name": "FleetAccountPayloads",
-                        "query": "{\"merges\":[{\"mergeType\":\"table\",\"leftTable\":\"FleetAccountPacking\",\"id\":\"FleetAccountPayloads-copy\"}],\"version\":\"Merge/1.0\"}",
-                        "version": "KqlParameterItem/1.0"
-                      },
-                      {
-                        "isRequired": false,
+                        "delimiter": ",",
                         "value": [
                           "value::all"
                         ],
-                        "delimiter": ",",
-                        "quote": "",
+                        "version": "KqlParameterItem/1.0",
+                        "multiSelect": true,
+                        "queryType": 7,
                         "typeSettings": {
                           "showDefault": false,
                           "additionalResourceOptions": [
                             "value::all"
                           ]
                         },
-                        "type": 2,
-                        "id": "FleetDeploymentPayloads",
                         "isHiddenWhenLocked": true,
-                        "queryType": 7,
-                        "multiSelect": true,
+                        "quote": "",
+                        "id": "FleetAccountPayloads",
+                        "query": "{\"merges\":[{\"leftTable\":\"FleetAccountPacking\",\"id\":\"FleetAccountPayloads-copy\",\"mergeType\":\"table\"}],\"version\":\"Merge/1.0\"}",
+                        "isRequired": false
+                      },
+                      {
+                        "type": 2,
                         "name": "FleetDeploymentPayloads",
-                        "query": "{\"merges\":[{\"mergeType\":\"table\",\"leftTable\":\"FleetDeploymentPacking\",\"id\":\"FleetDeploymentPayloads-copy\"}],\"version\":\"Merge/1.0\"}",
-                        "version": "KqlParameterItem/1.0"
-                      },
-                      {
-                        "isRequired": false,
+                        "delimiter": ",",
                         "value": [
                           "value::all"
                         ],
-                        "delimiter": ",",
-                        "quote": "",
+                        "version": "KqlParameterItem/1.0",
+                        "multiSelect": true,
+                        "queryType": 7,
                         "typeSettings": {
                           "showDefault": false,
                           "additionalResourceOptions": [
                             "value::all"
                           ]
                         },
-                        "type": 2,
-                        "id": "FleetCatalogPayloads",
                         "isHiddenWhenLocked": true,
-                        "queryType": 7,
-                        "multiSelect": true,
+                        "quote": "",
+                        "id": "FleetDeploymentPayloads",
+                        "query": "{\"merges\":[{\"leftTable\":\"FleetDeploymentPacking\",\"id\":\"FleetDeploymentPayloads-copy\",\"mergeType\":\"table\"}],\"version\":\"Merge/1.0\"}",
+                        "isRequired": false
+                      },
+                      {
+                        "type": 2,
                         "name": "FleetCatalogPayloads",
-                        "query": "{\"merges\":[{\"mergeType\":\"table\",\"leftTable\":\"FleetCatalogPacking\",\"id\":\"FleetCatalogPayloads-copy\"}],\"version\":\"Merge/1.0\"}",
-                        "version": "KqlParameterItem/1.0"
+                        "delimiter": ",",
+                        "value": [
+                          "value::all"
+                        ],
+                        "version": "KqlParameterItem/1.0",
+                        "multiSelect": true,
+                        "queryType": 7,
+                        "typeSettings": {
+                          "showDefault": false,
+                          "additionalResourceOptions": [
+                            "value::all"
+                          ]
+                        },
+                        "isHiddenWhenLocked": true,
+                        "quote": "",
+                        "id": "FleetCatalogPayloads",
+                        "query": "{\"merges\":[{\"leftTable\":\"FleetCatalogPacking\",\"id\":\"FleetCatalogPayloads-copy\",\"mergeType\":\"table\"}],\"version\":\"Merge/1.0\"}",
+                        "isRequired": false
                       }
                     ],
+                    "version": "KqlParameterItem/1.0",
                     "style": "pills"
                   },
-                  "type": 9,
                   "name": "v2-fleet-payloads"
                 },
                 {
+                  "type": 15,
                   "content": {
+                    "queryType": 1,
                     "crossComponentResources": [
                       "{Subscriptions}"
                     ],
-                    "query": "resourcecontainers\r\n| take 1\r\n| project items=dynamic([{FleetDeploymentPayloads}])\r\n| extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand d=batch limit 2000\r\n| project d\r\n| extend deploymentId=tolower(substring(tostring(d.deploymentId),2))\r\n| where isnotempty(deploymentId)\r\n| summarize by deploymentId\r\n| order by deploymentId asc\r\n| extend rowIndex=row_number()\r\n| where (rowIndex-1) % 1000 == 0\r\n| project V2PageIndex=toint((rowIndex-1)/1000)\r\n| summarize pages=make_set(V2PageIndex)\r\n| extend pages=iff(array_length(pages)==0, dynamic([0]), pages)\r\n| mv-expand page=pages limit 2000\r\n| project V2PageIndex=toint(page)\r\n| order by V2PageIndex asc",
                     "resourceType": "microsoft.resourcegraph/resources",
-                    "size": 2,
                     "version": "KqlItem/1.0",
-                    "queryType": 1
+                    "size": 2,
+                    "query": "resourcecontainers\r\n| take 1\r\n| project items=dynamic([{FleetDeploymentPayloads}])\r\n| extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand d=batch limit 2000\r\n| project d\r\n| extend deploymentId=tolower(substring(tostring(d.deploymentId),2))\r\n| where isnotempty(deploymentId)\r\n| summarize by deploymentId\r\n| order by deploymentId asc\r\n| extend rowIndex=row_number()\r\n| where (rowIndex-1) % 1000 == 0\r\n| project V2PageIndex=toint((rowIndex-1)/1000)\r\n| summarize pages=make_set(V2PageIndex)\r\n| extend pages=iff(array_length(pages)==0, dynamic([0]), pages)\r\n| mv-expand page=pages limit 2000\r\n| project V2PageIndex=toint(page)\r\n| order by V2PageIndex asc"
                   },
-                  "type": 15,
                   "name": "FleetReportPagePlan"
                 },
                 {
+                  "type": 14,
                   "content": {
                     "crossComponentResources": [
                       "{Subscriptions}"
                     ],
-                    "query": "// V2_RETIREMENT_REPORT\r\nresourcecontainers\r\n| take 1\r\n| project items=dynamic([{FleetDeploymentPayloads}])\r\n| extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand d=batch limit 2000\r\n| project d\r\n| extend d=pack('deploymentId', substring(tostring(d.deploymentId),2), 'deploymentName', substring(tostring(d.deploymentName),2),\r\n    'hostId', substring(tostring(d.hostId),2), 'modelName', substring(tostring(d.modelName),2), 'modelVersion', substring(tostring(d.modelVersion),2),\r\n    'modelFormat', substring(tostring(d.modelFormat),2), 'deploymentSku', substring(tostring(d.deploymentSku),2),\r\n    'capacity', substring(tostring(d.capacity),2), 'upgradePolicy', substring(tostring(d.upgradePolicy),2),\r\n    'provisioningState', substring(tostring(d.provisioningState),2), 'runId', substring(tostring(d.runId),2))\r\n| extend deploymentId=tolower(tostring(d.deploymentId)), hostId=tolower(tostring(d.hostId))\r\n| where isnotempty(deploymentId)\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | take 1\r\n    | project items=dynamic([{FleetCatalogPayloads}])\r\n    | extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand c=batch limit 2000\r\n| project c\r\n    | extend c=pack('deploymentId', substring(tostring(c.deploymentId),2), 'hostId', substring(tostring(c.hostId),2),\r\n        'region', substring(tostring(c.region),2), 'subscriptionId', substring(tostring(c.subscriptionId),2),\r\n        'accountKind', substring(tostring(c.accountKind),2), 'modelName', substring(tostring(c.modelName),2),\r\n        'modelVersion', substring(tostring(c.modelVersion),2), 'modelFormat', substring(tostring(c.modelFormat),2),\r\n        'lifecycle', substring(tostring(c.lifecycle),2), 'inferenceDate', substring(tostring(c.inferenceDate),2),\r\n        'fineTuneDate', substring(tostring(c.fineTuneDate),2), 'skuMatchesJson', tostring(c.skuMatchesJson),\r\n        'runId', substring(tostring(c.runId),2))\r\n    | project deploymentId=tolower(tostring(c.deploymentId)), c\r\n) on deploymentId\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | take 1\r\n    | project items=dynamic([{FleetAccountPayloads}])\r\n    | extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand a=batch limit 2000\r\n| project a\r\n    | extend a=pack('hostId', substring(tostring(a.hostId),2), 'accountName', substring(tostring(a.accountName),2),\r\n        'accountKind', substring(tostring(a.accountKind),2), 'region', substring(tostring(a.region),2),\r\n        'subscriptionId', substring(tostring(a.subscriptionId),2), 'subscriptionName', substring(tostring(a.subscriptionName),2),\r\n        'resourceGroup', substring(tostring(a.resourceGroup),2), 'observedAt', substring(tostring(a.observedAt),2),\r\n        'runId', substring(tostring(a.runId),2))\r\n    | project hostId=tolower(tostring(a.hostId)), a\r\n) on hostId\r\n| extend exactMatch=isnotempty(tostring(d.modelName)) and isnotempty(tostring(d.modelVersion))\r\n    and isnotempty(tostring(d.modelFormat)) and isnotempty(tostring(a.hostId))\r\n    and tostring(d.runId)==tostring(a.runId) and tostring(c.runId)==tostring(a.runId)\r\n    and tostring(c.hostId) =~ tostring(d.hostId)\r\n    and tostring(c.subscriptionId) =~ tostring(a.subscriptionId)\r\n    and tostring(c.region) =~ tostring(a.region)\r\n    and tostring(c.accountKind) == tostring(a.accountKind)\r\n    and tostring(c.modelName) == tostring(d.modelName)\r\n    and tostring(c.modelVersion) == tostring(d.modelVersion)\r\n    and tostring(c.modelFormat) == tostring(d.modelFormat)\r\n| summarize deployments=make_set(d, 2), accounts=make_set(a, 2),\r\n    matches=make_set_if(c, exactMatch, 2),\r\n    staleCatalog=countif(isnotempty(tostring(c.deploymentId)) and tostring(c.runId)!=tostring(a.runId)),\r\n    rejected=countif(isnotempty(tostring(c.deploymentId)) and not(exactMatch))\r\n    by deploymentId\r\n| extend d=deployments[0], a=accounts[0],\r\n    matchCount=array_length(matches),\r\n    m=iff(array_length(matches)==1, matches[0], dynamic({}))\r\n| extend skus=parse_json(tostring(m.skuMatchesJson))\r\n| extend skuCount=coalesce(array_length(skus), 0)\r\n| extend sku=iff(skuCount==1, skus[0], dynamic({}))\r\n| extend modelDate=todatetime(m.inferenceDate),\r\n    fineTuneDate=todatetime(m.fineTuneDate),\r\n    skuDate=todatetime(sku.deprecationDate)\r\n| extend status=case(\r\n    array_length(deployments)!=1, 'Deployment changed during load - reload',\r\n    array_length(accounts)!=1, 'Account metadata missing or ambiguous',\r\n    tostring(d.runId)!=tostring(a.runId), 'Deployment data stale or collection incomplete',\r\n    isempty(tostring(d.modelName)) or isempty(tostring(d.modelVersion)) or isempty(tostring(d.modelFormat)), 'Deployment model identity incomplete',\r\n    matchCount==0 and staleCatalog>0, 'Catalog data stale or collection incomplete',\r\n    matchCount==0 and rejected>0, 'Catalog identity mismatch',\r\n    matchCount==0, 'No exact catalog match',\r\n    matchCount>1, 'Conflicting catalog matches',\r\n    isempty(tostring(d.deploymentSku)), 'Deployment SKU not reported',\r\n    isnull(array_length(skus)), 'Invalid SKU metadata',\r\n    skuCount==0, 'Model matched; SKU not in catalog',\r\n    skuCount>1, 'Ambiguous SKU metadata',\r\n    tostring(sku.name)!=tostring(d.deploymentSku), 'Catalog SKU mismatch',\r\n    (isnotempty(tostring(m.inferenceDate)) and isnull(modelDate))\r\n        or (isnotempty(tostring(sku.deprecationDate)) and isnull(skuDate)), 'Invalid retirement date in API response',\r\n    isnull(modelDate) and isnull(skuDate), 'No retirement date published',\r\n    'Matched')\r\n| extend effectiveDate=iff(status=='Matched', coalesce(skuDate, modelDate), datetime(null)),\r\n    lifecycle=tostring(m.lifecycle)\r\n| extend daysRemaining=datetime_diff('day', startofday(effectiveDate), startofday(now()))\r\n| extend retirementWindow=case(\r\n    isnull(effectiveDate), 'Not assessed / no date',\r\n    daysRemaining<=0, 'Reported date reached or passed',\r\n    daysRemaining<=30, 'Within 30 days',\r\n    daysRemaining<=60, '31-60 days',\r\n    daysRemaining<=90, '61-90 days',\r\n    'More than 90 days'),\r\n    dateBasis=case(isnull(effectiveDate), '', isnotnull(skuDate), 'Deployment SKU', 'Model inference'),\r\n    dateMeaning=case(isnull(effectiveDate), '', lifecycle =~ 'Preview', 'Preview earliest date - may be extended', 'API-reported date - subject to change')\r\n| extend riskRank=case(isnull(effectiveDate), 2, daysRemaining<=90, 0, 1)\r\n| project\r\n    ['Foundry / OpenAI account']=tostring(a.accountName),\r\n    ['Account kind']=tostring(a.accountKind),\r\n    Deployment=tostring(d.deploymentName),\r\n    Model=tostring(d.modelName),\r\n    Version=tostring(d.modelVersion),\r\n    Format=tostring(d.modelFormat),\r\n    SKU=tostring(d.deploymentSku),\r\n    Capacity=todouble(d.capacity),\r\n    ['Retirement date']=effectiveDate,\r\n    ['Days remaining']=daysRemaining,\r\n    ['Retirement window']=retirementWindow,\r\n    ['Metadata status']=status,\r\n    ['Date basis']=dateBasis,\r\n    ['Date interpretation']=dateMeaning,\r\n    ['Model inference retirement']=modelDate,\r\n    ['SKU retirement']=skuDate,\r\n    ['Fine-tuning retirement']=fineTuneDate,\r\n    ['API lifecycle']=lifecycle,\r\n    ['Upgrade policy']=tostring(d.upgradePolicy),\r\n    ['Migration note']=iff(tostring(d.deploymentSku) contains 'Provisioned', 'Provisioned deployments require manual migration', 'Review upgrade policy and current retirement guidance'),\r\n    ['Provisioning state']=tostring(d.provisioningState),\r\n    Subscription=tostring(a.subscriptionName),\r\n    ['Subscription ID']=tostring(a.subscriptionId),\r\n    ['Resource group']=tostring(a.resourceGroup),\r\n    Region=tostring(a.region),\r\n    ['Scope read time']=todatetime(a.observedAt),\r\n    ['Deployment ID']=deploymentId,\r\n    ['Account ID']=tostring(a.hostId),\r\n    ['Catalog source']=strcat('https://management.azure.com/subscriptions/', tostring(a.subscriptionId),\r\n        '/providers/Microsoft.CognitiveServices/locations/', tostring(a.region), '/models?api-version=2024-10-01'),\r\n    riskRank\r\n| order by riskRank asc, ['Days remaining'] asc nulls last, ['Foundry / OpenAI account'] asc, Deployment asc, ['Deployment ID'] asc\r\n| project-away riskRank\r\n| extend _v2Row=row_number()\r\n| where _v2Row > (toint('{V2PageIndex}') * 1000) and _v2Row <= ((toint('{V2PageIndex}') + 1) * 1000)\r\n| project-away _v2Row",
+                    "queryType": 1,
                     "dataSourceId": "FleetReportPagePlan",
                     "resourceType": "microsoft.resourcegraph/resources",
                     "version": "NotebookDataRepeater/1.0",
-                    "queryType": 1
+                    "query": "// V2_RETIREMENT_REPORT\r\nresourcecontainers\r\n| take 1\r\n| project items=dynamic([{FleetDeploymentPayloads}])\r\n| extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand d=batch limit 2000\r\n| project d\r\n| extend d=pack('deploymentId', substring(tostring(d.deploymentId),2), 'deploymentName', substring(tostring(d.deploymentName),2),\r\n    'hostId', substring(tostring(d.hostId),2), 'modelName', substring(tostring(d.modelName),2), 'modelVersion', substring(tostring(d.modelVersion),2),\r\n    'modelFormat', substring(tostring(d.modelFormat),2), 'deploymentSku', substring(tostring(d.deploymentSku),2),\r\n    'capacity', substring(tostring(d.capacity),2), 'upgradePolicy', substring(tostring(d.upgradePolicy),2),\r\n    'provisioningState', substring(tostring(d.provisioningState),2), 'runId', substring(tostring(d.runId),2))\r\n| extend deploymentId=tolower(tostring(d.deploymentId)), hostId=tolower(tostring(d.hostId))\r\n| where isnotempty(deploymentId)\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | take 1\r\n    | project items=dynamic([{FleetCatalogPayloads}])\r\n    | extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand c=batch limit 2000\r\n| project c\r\n    | extend c=pack('deploymentId', substring(tostring(c.deploymentId),2), 'hostId', substring(tostring(c.hostId),2),\r\n        'region', substring(tostring(c.region),2), 'subscriptionId', substring(tostring(c.subscriptionId),2),\r\n        'accountKind', substring(tostring(c.accountKind),2), 'modelName', substring(tostring(c.modelName),2),\r\n        'modelVersion', substring(tostring(c.modelVersion),2), 'modelFormat', substring(tostring(c.modelFormat),2),\r\n        'lifecycle', substring(tostring(c.lifecycle),2), 'inferenceDate', substring(tostring(c.inferenceDate),2),\r\n        'fineTuneDate', substring(tostring(c.fineTuneDate),2), 'skuMatchesJson', tostring(c.skuMatchesJson),\r\n        'runId', substring(tostring(c.runId),2))\r\n    | project deploymentId=tolower(tostring(c.deploymentId)), c\r\n) on deploymentId\r\n| join kind=leftouter (\r\n    resourcecontainers\r\n    | take 1\r\n    | project items=dynamic([{FleetAccountPayloads}])\r\n    | extend chunks=range(0, tolong(array_length(items)/2000), 1)\r\n| mv-expand chunk=chunks limit 2000\r\n| extend batch=array_slice(items, toint(chunk)*2000, toint(chunk)*2000+1999)\r\n| mv-expand a=batch limit 2000\r\n| project a\r\n    | extend a=pack('hostId', substring(tostring(a.hostId),2), 'accountName', substring(tostring(a.accountName),2),\r\n        'accountKind', substring(tostring(a.accountKind),2), 'region', substring(tostring(a.region),2),\r\n        'subscriptionId', substring(tostring(a.subscriptionId),2), 'subscriptionName', substring(tostring(a.subscriptionName),2),\r\n        'resourceGroup', substring(tostring(a.resourceGroup),2), 'observedAt', substring(tostring(a.observedAt),2),\r\n        'runId', substring(tostring(a.runId),2))\r\n    | project hostId=tolower(tostring(a.hostId)), a\r\n) on hostId\r\n| extend exactMatch=isnotempty(tostring(d.modelName)) and isnotempty(tostring(d.modelVersion))\r\n    and isnotempty(tostring(d.modelFormat)) and isnotempty(tostring(a.hostId))\r\n    and tostring(d.runId)==tostring(a.runId) and tostring(c.runId)==tostring(a.runId)\r\n    and tostring(c.hostId) =~ tostring(d.hostId)\r\n    and tostring(c.subscriptionId) =~ tostring(a.subscriptionId)\r\n    and tostring(c.region) =~ tostring(a.region)\r\n    and tostring(c.accountKind) == tostring(a.accountKind)\r\n    and tostring(c.modelName) == tostring(d.modelName)\r\n    and tostring(c.modelVersion) == tostring(d.modelVersion)\r\n    and tostring(c.modelFormat) == tostring(d.modelFormat)\r\n| summarize deployments=make_set(d, 2), accounts=make_set(a, 2),\r\n    matches=make_set_if(c, exactMatch, 2),\r\n    staleCatalog=countif(isnotempty(tostring(c.deploymentId)) and tostring(c.runId)!=tostring(a.runId)),\r\n    rejected=countif(isnotempty(tostring(c.deploymentId)) and not(exactMatch))\r\n    by deploymentId\r\n| extend d=deployments[0], a=accounts[0],\r\n    matchCount=array_length(matches),\r\n    m=iff(array_length(matches)==1, matches[0], dynamic({}))\r\n| extend skus=parse_json(tostring(m.skuMatchesJson))\r\n| extend skuCount=coalesce(array_length(skus), 0)\r\n| extend sku=iff(skuCount==1, skus[0], dynamic({}))\r\n| extend modelDate=todatetime(m.inferenceDate),\r\n    fineTuneDate=todatetime(m.fineTuneDate),\r\n    skuDate=todatetime(sku.deprecationDate)\r\n| extend status=case(\r\n    array_length(deployments)!=1, 'Deployment changed during load - reload',\r\n    array_length(accounts)!=1, 'Account metadata missing or ambiguous',\r\n    tostring(d.runId)!=tostring(a.runId), 'Deployment data stale or collection incomplete',\r\n    isempty(tostring(d.modelName)) or isempty(tostring(d.modelVersion)) or isempty(tostring(d.modelFormat)), 'Deployment model identity incomplete',\r\n    matchCount==0 and staleCatalog>0, 'Catalog data stale or collection incomplete',\r\n    matchCount==0 and rejected>0, 'Catalog identity mismatch',\r\n    matchCount==0, 'No exact catalog match',\r\n    matchCount>1, 'Conflicting catalog matches',\r\n    isempty(tostring(d.deploymentSku)), 'Deployment SKU not reported',\r\n    isnull(array_length(skus)), 'Invalid SKU metadata',\r\n    skuCount==0, 'Model matched; SKU not in catalog',\r\n    skuCount>1, 'Ambiguous SKU metadata',\r\n    tostring(sku.name)!=tostring(d.deploymentSku), 'Catalog SKU mismatch',\r\n    (isnotempty(tostring(m.inferenceDate)) and isnull(modelDate))\r\n        or (isnotempty(tostring(sku.deprecationDate)) and isnull(skuDate)), 'Invalid retirement date in API response',\r\n    isnull(modelDate) and isnull(skuDate), 'No retirement date published',\r\n    'Matched')\r\n| extend effectiveDate=iff(status=='Matched', coalesce(skuDate, modelDate), datetime(null)),\r\n    lifecycle=tostring(m.lifecycle)\r\n| extend daysRemaining=datetime_diff('day', startofday(effectiveDate), startofday(now()))\r\n| extend retirementWindow=case(\r\n    isnull(effectiveDate), 'Not assessed / no date',\r\n    daysRemaining<=0, 'Reported date reached or passed',\r\n    daysRemaining<=30, 'Within 30 days',\r\n    daysRemaining<=60, '31-60 days',\r\n    daysRemaining<=90, '61-90 days',\r\n    'More than 90 days'),\r\n    dateBasis=case(isnull(effectiveDate), '', isnotnull(skuDate), 'Deployment SKU', 'Model inference'),\r\n    dateMeaning=case(isnull(effectiveDate), '', lifecycle =~ 'Preview', 'Preview earliest date - may be extended', 'API-reported date - subject to change')\r\n| extend riskRank=case(isnull(effectiveDate), 2, daysRemaining<=90, 0, 1)\r\n| project\r\n    ['Foundry / OpenAI account']=tostring(a.accountName),\r\n    ['Account kind']=tostring(a.accountKind),\r\n    Deployment=tostring(d.deploymentName),\r\n    Model=tostring(d.modelName),\r\n    Version=tostring(d.modelVersion),\r\n    Format=tostring(d.modelFormat),\r\n    SKU=tostring(d.deploymentSku),\r\n    Capacity=todouble(d.capacity),\r\n    ['Retirement date']=effectiveDate,\r\n    ['Days remaining']=daysRemaining,\r\n    ['Retirement window']=retirementWindow,\r\n    ['Metadata status']=status,\r\n    ['Date basis']=dateBasis,\r\n    ['Date interpretation']=dateMeaning,\r\n    ['Model inference retirement']=modelDate,\r\n    ['SKU retirement']=skuDate,\r\n    ['Fine-tuning retirement']=fineTuneDate,\r\n    ['API lifecycle']=lifecycle,\r\n    ['Upgrade policy']=tostring(d.upgradePolicy),\r\n    ['Migration note']=iff(tostring(d.deploymentSku) contains 'Provisioned', 'Provisioned deployments require manual migration', 'Review upgrade policy and current retirement guidance'),\r\n    ['Provisioning state']=tostring(d.provisioningState),\r\n    Subscription=tostring(a.subscriptionName),\r\n    ['Subscription ID']=tostring(a.subscriptionId),\r\n    ['Resource group']=tostring(a.resourceGroup),\r\n    Region=tostring(a.region),\r\n    ['Scope read time']=todatetime(a.observedAt),\r\n    ['Deployment ID']=deploymentId,\r\n    ['Account ID']=tostring(a.hostId),\r\n    ['Catalog source']=strcat('https://management.azure.com/subscriptions/', tostring(a.subscriptionId),\r\n        '/providers/Microsoft.CognitiveServices/locations/', tostring(a.region), '/models?api-version=2024-10-01'),\r\n    riskRank\r\n| order by riskRank asc, ['Days remaining'] asc nulls last, ['Foundry / OpenAI account'] asc, Deployment asc, ['Deployment ID'] asc\r\n| project-away riskRank\r\n| extend _v2Row=row_number()\r\n| where _v2Row > (toint('{V2PageIndex}') * 1000) and _v2Row <= ((toint('{V2PageIndex}') + 1) * 1000)\r\n| project-away _v2Row"
                   },
-                  "type": 14,
                   "name": "FleetReportPages"
                 },
                 {
+                  "type": 3,
                   "content": {
+                    "noDataMessage": "No report is available. It may still be loading, a source query may have failed, or these accounts may have no deployments. This is not proof of a complete or zero-deployment inventory. Check source diagnostics in Edit mode and use Refresh to retry.",
                     "gridSettings": {
+                      "filter": true,
                       "formatters": [
                         {
                           "formatter": 0,
                           "numberFormat": {
+                            "unit": 0,
                             "options": {
+                              "maximumFractionDigits": 2,
                               "minimumFractionDigits": 0,
-                              "style": "decimal",
-                              "maximumFractionDigits": 2
-                            },
-                            "unit": 0
+                              "style": "decimal"
+                            }
                           },
                           "columnMatch": "Capacity"
                         }
                       ],
-                      "rowLimit": 10000,
-                      "filter": true
+                      "rowLimit": 10000
                     },
-                    "showExportToExcel": true,
-                    "noDataMessage": "No report is available. It may still be loading, a source query may have failed, or these accounts may have no deployments. This is not proof of a complete or zero-deployment inventory. Check source diagnostics in Edit mode and use Refresh to retry.",
                     "title": "Deployed models and retirement exposure",
-                    "version": "KqlItem/1.0",
-                    "size": 0,
                     "queryType": 7,
-                    "query": "{\"merges\":[{\"mergeType\":\"table\",\"leftTable\":\"FleetReportPages\",\"id\":\"v2-report-pages\"}],\"version\":\"Merge/1.0\"}"
+                    "query": "{\"merges\":[{\"leftTable\":\"FleetReportPages\",\"id\":\"v2-report-pages\",\"mergeType\":\"table\"}],\"version\":\"Merge/1.0\"}",
+                    "version": "KqlItem/1.0",
+                    "showExportToExcel": true,
+                    "size": 0
                   },
-                  "type": 3,
                   "name": "FleetRetirementReport"
                 }
               ],
               "groupType": "editable"
             },
-            "type": 12,
-            "name": "v2-fleet-loaded",
             "conditionalVisibilities": [
               {
                 "value": "ready",
@@ -3984,16 +3989,11 @@
                 "comparison": "isEqualTo",
                 "parameterName": "FleetStatus"
               }
-            ]
+            ],
+            "name": "v2-fleet-loaded"
           }
         ],
         "groupType": "editable"
-      },
-      "type": 12,
-      "conditionalVisibility": {
-        "value": "fleetRetirementV2",
-        "comparison": "isEqualTo",
-        "parameterName": "selectedTab"
       },
       "name": "group-fleet-retirement-v2"
     }
