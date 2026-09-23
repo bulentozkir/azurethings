@@ -617,25 +617,21 @@ $fixtureBuiltIns.B43.parameters.effect = @{
     defaultValue = 'Audit'
     metadata = @{ deprecated = $true }
 }
-$filterChoices = @{
-    B22 = @('Profanity', 'Jailbreak', 'Indirect Attack', 'Indirect Attack Spotlighting')
-    B23 = @('Profanity', 'Protected Material Code', 'Protected Material Text')
-    B24 = @('Hate', 'Sexual', 'Violence', 'Selfharm')
-    B26 = @('Profanity', 'Jailbreak', 'Indirect Attack', 'Indirect Attack Spotlighting')
-    B27 = @('Hate', 'Sexual', 'Violence', 'Selfharm')
+$fixtureBuiltIns.B06.parameters.isolationMode = @{
+    type = 'String'
+    allowedValues = @('AllowInternetOutbound', 'AllowOnlyApprovedOutbound', 'Disabled')
+    defaultValue = 'Disabled'
 }
-foreach ($referenceId in $filterChoices.Keys) {
-    $fixtureBuiltIns[$referenceId].parameters.filterName = @{
+foreach ($referenceId in @('B29', 'B30')) {
+    $fixtureBuiltIns[$referenceId].parameters.requiredRetentionDays = @{
         type = 'String'
-        allowedValues = $filterChoices[$referenceId]
-        metadata = @{ displayName = 'Content Filter'; description = 'Content filter name.' }
+        defaultValue = '365'
     }
 }
-foreach ($referenceId in @('B26', 'B27')) {
-    $fixtureBuiltIns[$referenceId].parameters.entityKind = @{
-        type = 'Array'
-        metadata = @{ displayName = 'Entity Kind'; description = 'Entity kinds to assess.' }
-    }
+$fixtureBuiltIns.B42.parameters.excludedManagedByResourceProviders = @{
+    type = 'Array'
+    allowedValues = @('Azure Red Hat OpenShift', 'Azure Databricks', 'Microsoft Purview', 'All managed resource groups')
+    defaultValue = @()
 }
 $fixtureScope = '/providers/Microsoft.Management/managementGroups/00000000-0000-0000-0000-000000000000'
 $initiative = New-AuditInitiative -Scope $fixtureScope -Prefix 'test-ai' -Name 'Audit test' -CustomDefinitions $definitions -SelectedPolicies $selection -BuiltInDefinitions $fixtureBuiltIns
@@ -643,28 +639,80 @@ $keyVaultReference = $initiative.policyDefinitions | Where-Object { $_.policyDef
 Confirm-Assertion ($keyVaultReference.parameters.audit_effect.value -eq 'Audit') 'Key Vault active effect must be fixed to Audit.'
 Confirm-Assertion ($keyVaultReference.parameters.effect.value -eq 'Audit') 'Key Vault deprecated effect must be fixed to Audit.'
 Confirm-Assertion (-not $initiative.parameters.Contains('B43_effect')) 'Do not expose the deprecated Key Vault effect as an initiative parameter.'
-$extraFilterReferences = ($filterChoices.Values | ForEach-Object { $_.Count - 1 } | Measure-Object -Sum).Sum
-Confirm-Assertion ($initiative.policyDefinitions.Count -eq 16 + $selection.Count + $extraFilterReferences) 'Unexpected number of initiative references.'
-foreach ($referenceId in $filterChoices.Keys) {
-    $filterReferences = @($initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $referenceId -or $_.policyDefinitionReferenceId -like "${referenceId}_*" })
-    Confirm-Assertion ($filterReferences.Count -eq $filterChoices[$referenceId].Count) "Missing expanded category for $referenceId"
-    Confirm-Assertion (@(Compare-Object $filterChoices[$referenceId] @($filterReferences.parameters.filterName.value)).Count -eq 0) "Wrong filter coverage for $referenceId"
-    $legacyName = "${referenceId}_filterName"
-    Confirm-Assertion ($initiative.parameters[$legacyName].type -eq 'String') "Preserve the saved scalar parameter type for $legacyName"
-    Confirm-Assertion ($initiative.parameters[$legacyName].Contains('defaultValue')) "Unused compatibility parameter must not require assignment input: $legacyName"
-    Confirm-Assertion ($initiative.parameters[$legacyName].metadata.description -like '*Changing this value has no effect*') "Compatibility parameter behavior must be explicit: $legacyName"
-    foreach ($reference in $filterReferences) {
-        Confirm-Assertion ($reference.parameters.effect.value -eq 'Audit') "Expanded filter must remain fixed Audit: $($reference.policyDefinitionReferenceId)"
-        Confirm-Assertion ($reference.parameters.testRequiredValue.value -eq "[parameters('${referenceId}_testRequiredValue')]") 'Expanded categories must share the original family parameters.'
-    }
+$coreBuiltInReferences = @('B01', 'B04', 'B06', 'B07', 'B09', 'B10', 'B11', 'B28', 'B29', 'B30', 'B36') + @(38..57 | ForEach-Object { "B$_" })
+Confirm-Assertion (@(Compare-Object $coreBuiltInReferences @($selection.reference)).Count -eq 0) 'Only the agreed core security built-ins may enter the baseline.'
+Confirm-Assertion ($initiative.policyDefinitions.Count -eq 13 + $selection.Count) 'Unexpected number of core initiative references.'
+Confirm-Assertion (@($initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -match '^AI_(AccountKinds|DeploymentSkus|VirtualNetworkRules)$|^B(05|12|13|14|16|17|18|19|20|22|23|24|25|26|27|31|32|33|34|35)(_|$)' }).Count -eq 0) 'Optional, model, publisher, service-kind, and SKU controls must not remain in the initiative.'
+Confirm-Assertion (@($initiative.parameters.Keys | Where-Object { $_ -in @('allowedKinds', 'allowedDeploymentSkus', 'allowedSubnetIds') -or $_ -match '^B(18|19|20|22|23|24|25|26|27|31)_' }).Count -eq 0) 'Fresh core initiatives must not expose model, publisher, service-kind, SKU, filter, or destination inputs.'
+$networkReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B06' } | Select-Object -First 1
+Confirm-Assertion ($networkReference.parameters.isolationMode.value -eq 'AllowOnlyApprovedOutbound') 'The ML network baseline must not inherit the misleading Disabled mode default.'
+foreach ($referenceId in @('B29', 'B30')) {
+    $loggingReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $referenceId } | Select-Object -First 1
+    Confirm-Assertion ($loggingReference.parameters.requiredRetentionDays.value -eq '0') 'Basic logging checks must not impose an organization-wide storage retention period.'
 }
-foreach ($referenceId in @('B26', 'B27')) {
-    $entityParameter = $initiative.parameters["${referenceId}_entityKind"]
-    Confirm-Assertion ($entityParameter.type -eq 'Array') 'Agent entity kinds must retain the built-in array contract.'
-    Confirm-Assertion (-not $entityParameter.Contains('defaultValue')) 'Do not invent an agent-kind default that might skip all agents.'
-    Confirm-Assertion ($entityParameter.metadata.description.Contains('[] assesses no agents')) 'Explain the empty agent-kind scope.'
-    Confirm-Assertion ($entityParameter.metadata.description.Contains('["<entity-kind>"]')) 'Agent-kind help must show valid JSON array syntax.'
+$storageReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B42' } | Select-Object -First 1
+Confirm-Assertion (@($storageReference.parameters.excludedManagedByResourceProviders.value).Count -eq 0) 'Core private-endpoint coverage must not silently exempt managed-service storage.'
+foreach ($parameterName in @('B06_isolationMode', 'B29_requiredRetentionDays', 'B30_requiredRetentionDays', 'B42_excludedManagedByResourceProviders')) {
+    Confirm-Assertion (-not $initiative.parameters.Contains($parameterName)) "Fixed baseline setting must not require operator configuration: $parameterName"
 }
+foreach ($referenceId in @('B18', 'B19', 'B20', 'B26', 'B27')) {
+    Confirm-Assertion ($manifest.assignmentProfile.excludedReferences.Contains($referenceId)) "Workload-specific model and agent controls must remain excluded: $referenceId"
+}
+Confirm-Assertion ($definitions.ContainsKey('restrict-ai-virtual-network-rules')) 'Removing the subnet check from the initiative must not delete its standalone definition.'
+$retiredParameters = @{
+    allowedKinds = @{ type = 'Array'; metadata = @{ displayName = 'Approved service kinds' } }
+    allowedDeploymentSkus = @{ type = 'Array'; metadata = @{ displayName = 'Approved deployment SKUs' } }
+    allowedSubnetIds = @{ type = 'Array'; metadata = @{ displayName = 'Approved subnets'; assignPermissions = $true } }
+    B13_excludedKinds = @{ type = 'Array'; defaultValue = @() }
+    B18_allowedPublishers = @{ type = 'Array'; defaultValue = @('Microsoft') }
+    B19_onlyAllowDirectFromAzure = @{ type = 'Boolean'; defaultValue = $false }
+    B20_allowedAssetIds = @{ type = 'Array'; defaultValue = @() }
+    B22_filterName = @{ type = 'String'; allowedValues = @('Profanity', 'Jailbreak'); metadata = @{ displayName = 'Content Filter' } }
+    B23_allowedEnabledForCompletion = @{ type = 'Array'; allowedValues = @('true', 'false'); defaultValue = @('true') }
+    B24_allowedSeveritiesForPrompt = @{ type = 'Array'; allowedValues = @('Low', 'Medium', 'High'); defaultValue = @('Medium', 'High') }
+    B25_raiPolicyMode = @{ type = 'Array'; allowedValues = @('Default', 'Asynchronous_filter'); defaultValue = @('Default', 'Asynchronous_filter') }
+    B31_logAnalytics = @{ type = 'String'; metadata = @{ strongType = 'omsWorkspace'; assignPermissions = $true } }
+    B06_isolationMode = @{ type = 'String'; allowedValues = @('AllowInternetOutbound', 'AllowOnlyApprovedOutbound', 'Disabled'); defaultValue = 'Disabled' }
+    B29_requiredRetentionDays = @{ type = 'String'; defaultValue = '365' }
+    B30_requiredRetentionDays = @{ type = 'String'; defaultValue = '365' }
+    B42_excludedManagedByResourceProviders = @{ type = 'Array'; defaultValue = @() }
+    B26_entityKind = @{ type = 'Array'; metadata = @{ displayName = 'Entity Kind' } }
+    B27_entityKind = @{ type = 'Array'; metadata = @{ displayName = 'Entity Kind' } }
+    B26_filterName = @{ type = 'String'; allowedValues = @('Profanity', 'Jailbreak'); metadata = @{ displayName = 'Content Filter' } }
+    B27_filterName = @{ type = 'String'; allowedValues = @('Hate', 'Sexual', 'Violence', 'Selfharm'); defaultValue = 'Hate'; metadata = @{ displayName = 'Content Filter' } }
+    B26_allowedEnabledForPrompt = @{ type = 'Array'; allowedValues = @('true', 'false'); defaultValue = @('true') }
+    B27_allowedSeveritiesForPrompt = @{ type = 'Array'; allowedValues = @('Low', 'Medium', 'High'); defaultValue = @('Medium', 'High') }
+}
+$previousParameters = $retiredParameters | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable
+$originalParametersJson = $previousParameters | ConvertTo-Json -Depth 100 -Compress
+$upgradedInitiative = New-AuditInitiative -Scope $fixtureScope -Prefix 'test-ai' -Name 'Audit test' -CustomDefinitions $definitions -SelectedPolicies $selection -BuiltInDefinitions $fixtureBuiltIns -ExistingParameters $previousParameters
+Confirm-Assertion (($previousParameters | ConvertTo-Json -Depth 100 -Compress) -eq $originalParametersJson) 'Compatibility migration must not mutate existing parameter schemas in memory.'
+Confirm-Assertion (($upgradedInitiative.policyDefinitions | ConvertTo-Json -Depth 100 -Compress) -eq ($initiative.policyDefinitions | ConvertTo-Json -Depth 100 -Compress)) 'Retired parameters must not reintroduce removed references or change active bindings.'
+foreach ($parameterName in $initiative.parameters.Keys) {
+    Confirm-Assertion (($initiative.policyDefinitions | ConvertTo-Json -Depth 100 -Compress).Contains("[parameters('$parameterName')]")) "Fresh initiatives must not contain unused parameters: $parameterName"
+}
+foreach ($parameterName in $retiredParameters.Keys) {
+    $retiredSchema = $upgradedInitiative.parameters[$parameterName]
+    Confirm-Assertion ($retiredSchema.type -eq $retiredParameters[$parameterName].type) "Retired parameter type must stay compatible: $parameterName"
+    Confirm-Assertion ($retiredSchema.Contains('defaultValue')) "Retired field must not require assignment input: $parameterName"
+    Confirm-Assertion ($retiredSchema.metadata.displayName.StartsWith('Retired (not used):')) "Clearly label retired parameters: $parameterName"
+    Confirm-Assertion (-not $retiredSchema.metadata.Contains('assignPermissions')) 'Retired parameters must not request permission assignments.'
+    Confirm-Assertion (-not ($upgradedInitiative.policyDefinitions | ConvertTo-Json -Depth 100 -Compress).Contains("[parameters('$parameterName')]")) "Removed policy parameter remains bound: $parameterName"
+}
+foreach ($parameterName in @('allowedKinds', 'allowedDeploymentSkus', 'allowedSubnetIds', 'B26_entityKind', 'B27_entityKind')) {
+    Confirm-Assertion (@($upgradedInitiative.parameters[$parameterName].defaultValue).Count -eq 0) 'Unused retired array parameters may have an empty default without affecting any active policy.'
+}
+$secondUpgrade = New-AuditInitiative -Scope $fixtureScope -Prefix 'test-ai' -Name 'Audit test' -CustomDefinitions $definitions -SelectedPolicies $selection -BuiltInDefinitions $fixtureBuiltIns -ExistingParameters $upgradedInitiative.parameters
+Confirm-Assertion (($secondUpgrade.parameters | ConvertTo-Json -Depth 100 -Compress) -eq ($upgradedInitiative.parameters | ConvertTo-Json -Depth 100 -Compress)) 'Retired-parameter migration must be idempotent.'
+$unexpectedRemovalRejected = $false
+try {
+    $null = New-AuditInitiative -Scope $fixtureScope -Prefix 'test-ai' -Name 'Audit test' -CustomDefinitions $definitions -SelectedPolicies $selection -BuiltInDefinitions $fixtureBuiltIns -ExistingParameters @{ unrelatedSavedParameter = @{ type = 'String'; defaultValue = 'keep' } }
+}
+catch {
+    if ($_.Exception.Message -notlike 'Cannot remove saved initiative parameter:*') { throw }
+    $unexpectedRemovalRejected = $true
+}
+Confirm-Assertion $unexpectedRemovalRejected 'Do not silently remove unrelated saved initiative parameters.'
 Confirm-Assertion (@($initiative.policyDefinitions.policyDefinitionReferenceId | Sort-Object -Unique).Count -eq $initiative.policyDefinitions.Count) 'Duplicate initiative reference IDs.'
 foreach ($reference in $initiative.policyDefinitions | Where-Object { $_.policyDefinitionId -notlike '/providers/Microsoft.Authorization/policyDefinitions/*' }) {
     Confirm-Assertion ($reference.policyDefinitionId.StartsWith("$fixtureScope/providers/Microsoft.Authorization/policyDefinitions/")) 'Custom policies must use the root management-group scope.'
@@ -691,7 +739,7 @@ foreach ($reference in $initiative.policyDefinitions) {
         }
     }
 }
-foreach ($parameterName in @('allowedLocations', 'allowedKinds', 'allowedDeploymentSkus', 'allowedIpRules', 'allowedSubnetIds')) {
+foreach ($parameterName in @('allowedLocations', 'allowedIpRules')) {
     Confirm-Assertion ($initiative.parameters.Contains($parameterName)) "Missing customer parameter: $parameterName"
     Confirm-Assertion (-not $initiative.parameters[$parameterName].Contains('defaultValue')) "Customer allowlist must not be invented: $parameterName"
 }
@@ -703,9 +751,7 @@ foreach ($policy in $selection) {
 }
 $builtInParameterLabels = @($initiative.parameters.GetEnumerator() | Where-Object { $_.Key -match '^B\d+_' } | ForEach-Object { $_.Value.metadata.displayName })
 Confirm-Assertion (@($builtInParameterLabels | Sort-Object -Unique).Count -eq $builtInParameterLabels.Count) 'Built-in parameter labels must be distinguishable in the assignment form.'
-$kindReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'AI_AccountKinds' } | Select-Object -First 1
-Confirm-Assertion ($kindReference.policyDefinitionId -eq "$fixtureScope/providers/Microsoft.Authorization/policyDefinitions/test-ai-allowed-ai-account-kinds") 'Account-kind audit requires a custom rule because the System Policy built-in is ineligible.'
-Confirm-Assertion ($kindReference.parameters.allowedKinds.value -eq "[parameters('allowedKinds')]") 'Existing account-kind assignment parameter must be preserved.'
+Confirm-Assertion ($definitions.ContainsKey('allowed-ai-account-kinds') -and $definitions.ContainsKey('allowed-model-deployment-skus')) 'Removing allowlists from the baseline must not delete standalone policy files.'
 Confirm-Assertion ($manifest.assignmentProfile.excludedReferences.Contains('B37')) 'The ineligible System Policy built-in must remain excluded.'
 Confirm-Assertion (-not [string]::IsNullOrWhiteSpace($definitions['allowed-ai-account-kinds'].metadata.builtInReview.gap)) 'Retained custom account-kind policy needs its verified built-in gap.'
 $systemPolicyRejected = $false
@@ -731,7 +777,7 @@ $networkAliases = @(@('restrict-ai-public-ip-access', 'restrict-ai-virtual-netwo
 Confirm-Assertion ('Microsoft.Search/searchServices/networkRuleSet.ipRules[*].value' -in $networkAliases) 'Nested field-count alias not discovered.'
 Confirm-Assertion ('Microsoft.CognitiveServices/accounts/networkAcls.virtualNetworkRules[*].id' -in $networkAliases) 'Subnet alias not discovered.'
 Confirm-Assertion (-not $definitions.ContainsKey('restrict-ai-public-network-access')) 'The combined public-access policy must not be republished alongside its replacements.'
-foreach ($referenceId in @('AI_PublicIPs', 'AI_VirtualNetworkRules', 'AI_TrustedServices', 'AI_PrivateEndpoints', 'AI_MonitorPrivateLinkScope', 'AI_FoundryVnetInjection')) {
+foreach ($referenceId in @('AI_PublicIPs', 'AI_TrustedServices', 'AI_PrivateEndpoints', 'AI_MonitorPrivateLinkScope', 'AI_FoundryVnetInjection')) {
     $reference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $referenceId } | Select-Object -First 1
     Confirm-Assertion ($null -ne $reference -and $reference.parameters.effect.value -eq 'Audit') "Missing audit-only network reference: $referenceId"
 }

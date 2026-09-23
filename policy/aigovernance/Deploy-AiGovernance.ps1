@@ -140,7 +140,7 @@ function New-AuditReference {
             }
             switch ($initiativeParameterName) {
                 'allowedLocations' { $parameterSchema.metadata.description = 'ARM resource locations to regard as compliant. JSON example: ["westeurope","northeurope"]. Replace with approved regions; include "global" only when explicitly approved. These are examples, not defaults.' }
-                'allowedKinds' { $parameterSchema.metadata.description = 'Cognitive Services account kinds to regard as compliant, including Foundry/OpenAI as applicable. JSON example: ["AIServices","OpenAI"]. These are account kinds, not the agent entity kinds below. Supply your approved list.' }
+                'allowedKinds' { $parameterSchema.metadata.description = 'Cognitive Services account kinds to regard as compliant, including Foundry/OpenAI as applicable. JSON example: ["AIServices","OpenAI"]. These are account kinds, not agent entity kinds. Supply your approved list.' }
                 'allowedDeploymentSkus' { $parameterSchema.metadata.description = 'Allowed Cognitive Services model deployment SKU names, not VM sizes. JSON example: ["Standard","DataZoneStandard"]. Choose the approved processing geography and SKUs for your organization; examples are not defaults.' }
                 'allowedIpRules' { $parameterSchema.metadata.description = 'Exact approved public IPv4 address/CIDR rule strings for Cognitive Services, Search, and ML workspaces. JSON format example: ["203.0.113.10","198.51.100.0/24"]. Replace these documentation addresses with real approved egress addresses. [] approves no IP exceptions. CIDR containment is not inferred.' }
                 'allowedSubnetIds' { $parameterSchema.metadata.description = 'Full approved subnet ARM IDs for Cognitive Services inbound VNet rules, including applicable Foundry/OpenAI accounts. JSON format: ["/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Network/virtualNetworks/<vnet>/subnets/<subnet>"]. [] approves no subnet exceptions. This is not Foundry agent VNet injection or private endpoint configuration.' }
@@ -170,17 +170,15 @@ function New-AuditInitiative {
         [string]$Name,
         [System.Collections.IDictionary]$CustomDefinitions,
         [object[]]$SelectedPolicies,
-        [System.Collections.IDictionary]$BuiltInDefinitions
+        [System.Collections.IDictionary]$BuiltInDefinitions,
+        [System.Collections.IDictionary]$ExistingParameters = @{}
     )
 
     $initiativeParameters = [ordered]@{}
     $references = [System.Collections.Generic.List[object]]::new()
     $customBindings = @(
         @{ file = 'allowed-ai-locations'; reference = 'AI_Locations'; names = @{ allowedLocations = 'allowedLocations'; resourceTypes = 'locationResourceTypes' } },
-        @{ file = 'allowed-ai-account-kinds'; reference = 'AI_AccountKinds'; names = @{ allowedKinds = 'allowedKinds' } },
-        @{ file = 'allowed-model-deployment-skus'; reference = 'AI_DeploymentSkus'; names = @{ allowedDeploymentSkus = 'allowedDeploymentSkus' } },
         @{ file = 'restrict-ai-public-ip-access'; reference = 'AI_PublicIPs'; names = @{ allowedIpRules = 'allowedIpRules' } },
-        @{ file = 'restrict-ai-virtual-network-rules'; reference = 'AI_VirtualNetworkRules'; names = @{ allowedSubnetIds = 'allowedSubnetIds' } },
         @{ file = 'restrict-ai-trusted-services'; reference = 'AI_TrustedServices'; names = @{ allowTrustedServices = 'allowTrustedServices' } },
         @{ file = 'require-ai-private-endpoints'; reference = 'AI_PrivateEndpoints'; names = @{} },
         @{ file = 'require-ai-monitor-private-link-scope'; reference = 'AI_MonitorPrivateLinkScope'; names = @{} },
@@ -213,57 +211,55 @@ function New-AuditInitiative {
         }
         $fixedParameters = if ($policy.Contains('fixedParameters')) { $policy.fixedParameters } else { @{} }
         $definition = $BuiltInDefinitions[$policy.reference]
-        if ($policy.Contains('expandByParameter')) {
-            $expandedParameter = $policy.expandByParameter
-            if (-not $definition.parameters.Contains($expandedParameter) -or
-                $definition.parameters[$expandedParameter].type -ne 'String' -or
-                -not $definition.parameters[$expandedParameter].Contains('allowedValues') -or
-                @($definition.parameters[$expandedParameter].allowedValues).Count -eq 0) {
-                throw "Cannot expand $($policy.reference): expected a String parameter with nonempty allowedValues: $expandedParameter"
-            }
-            $filterValues = @($definition.parameters[$expandedParameter].allowedValues)
-            $parameterNames = @{}
-            foreach ($parameterName in $definition.parameters.Keys) {
-                $parameterNames[$parameterName] = "$($policy.reference)_$parameterName"
-            }
-            $legacyParameter = $definition.parameters[$expandedParameter] | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable
-            $legacyParameter.defaultValue = $filterValues[0]
-            $legacyParameter.metadata = @{
-                displayName = "Compatibility only: former single-filter selection ($($policy.reference))"
-                description = "Unused compatibility field retained because saved initiative parameters cannot be deleted. Every category is now audited independently: $($filterValues -join ', '). Changing this value has no effect. Keep the default."
-            }
-            $initiativeParameters[$parameterNames[$expandedParameter]] = $legacyParameter
-            for ($filterIndex = 0; $filterIndex -lt $filterValues.Count; $filterIndex++) {
-                $filterValue = $filterValues[$filterIndex]
-                $referenceId = if ($filterIndex -eq 0) { $policy.reference } else { "$($policy.reference)_$($filterValue -replace '[^a-zA-Z0-9]', '')" }
-                $filterParameters = @{}
-                foreach ($entry in $fixedParameters.GetEnumerator()) { $filterParameters[$entry.Key] = $entry.Value }
-                $filterParameters[$expandedParameter] = $filterValue
-                $reference = New-AuditReference -ReferenceId $referenceId -DefinitionId $policy.policyDefinitionId -Definition $definition -Effect $policy.recommendedInitialEffect -InitiativeParameters $initiativeParameters -FixedParameters $filterParameters -ParameterNames $parameterNames
-                $references.Add($reference)
-            }
-        }
-        else {
-            $reference = New-AuditReference -ReferenceId $policy.reference -DefinitionId $policy.policyDefinitionId -Definition $definition -Effect $policy.recommendedInitialEffect -InitiativeParameters $initiativeParameters -FixedParameters $fixedParameters
-            $references.Add($reference)
-        }
+        $reference = New-AuditReference -ReferenceId $policy.reference -DefinitionId $policy.policyDefinitionId -Definition $definition -Effect $policy.recommendedInitialEffect -InitiativeParameters $initiativeParameters -FixedParameters $fixedParameters
+        $references.Add($reference)
     }
     if (@($references.policyDefinitionReferenceId | Sort-Object -Unique).Count -ne $references.Count) {
         throw 'The generated initiative contains duplicate reference IDs.'
+    }
+    foreach ($parameterName in $ExistingParameters.Keys) {
+        if ($initiativeParameters.Contains($parameterName)) { continue }
+        if ($parameterName -notin @('allowedSubnetIds', 'allowedKinds', 'allowedDeploymentSkus', 'B06_isolationMode', 'B29_requiredRetentionDays', 'B30_requiredRetentionDays', 'B42_excludedManagedByResourceProviders') -and
+            $parameterName -notmatch '^B(05|12|13|14|16|17|18|19|20|22|23|24|25|26|27|31|32|33|34|35)_') {
+            throw "Cannot remove saved initiative parameter: $parameterName. Review compatibility before publication."
+        }
+        $retiredParameter = $ExistingParameters[$parameterName] | ConvertTo-Json -Depth 100 | ConvertFrom-Json -AsHashtable
+        if (-not $retiredParameter.Contains('defaultValue')) {
+            if ($retiredParameter.type -eq 'Array') {
+                $retiredParameter.defaultValue = @()
+            }
+            elseif ($retiredParameter.type -eq 'String' -and $retiredParameter.Contains('allowedValues') -and
+                @($retiredParameter.allowedValues).Count -gt 0) {
+                $retiredParameter.defaultValue = $retiredParameter.allowedValues[0]
+            }
+            elseif ($parameterName -eq 'B31_logAnalytics' -and $retiredParameter.type -eq 'String') {
+                $retiredParameter.defaultValue = ''
+            }
+            else {
+                throw "Cannot make retired parameter optional without a compatible default: $parameterName"
+            }
+        }
+        if (-not $retiredParameter.Contains('metadata')) { $retiredParameter.metadata = @{} }
+        $retiredParameter.metadata.Remove('assignPermissions')
+        $retiredParameter.metadata.displayName = "Retired (not used): $parameterName"
+        $retiredParameter.metadata.description = 'This assignment input was removed from the core security baseline. This unused parameter is retained only because Azure does not allow saved initiative parameters to be deleted. No input is required; its value has no effect on assessment.'
+        $initiativeParameters[$parameterName] = $retiredParameter
     }
     if ($initiativeParameters.Count -gt 400 -or $references.Count -gt 1000) {
         throw 'The generated initiative exceeds Azure Policy limits.'
     }
     return [ordered]@{
         displayName = $Name
-        description = 'Audit-only AI governance, approved-source networking, and seven AI tags. No resource remediation or automatic enforcement. Customer-specific values are supplied at assignment time.'
+        description = 'Core AI security baseline: approved regions and public IPs, trusted-service bypass, private connectivity, keyless identity, diagnostic configuration, and seven AI tags. No model, publisher, service-kind, or deployment-SKU allowlists. Audit only; no automatic remediation.'
         policyType = 'Custom'
         metadata = @{
             category = 'AI Governance'
-            version = '1.1.0'
+            version = '2.0.0'
             managedBy = 'azurethings-ai-governance'
             auditOnly = $true
-            contentFilterCoverage = 'AllSupportedCategories'
+            baseline = 'CoreSecurity'
+            contentFilterCoverage = 'WorkloadReviewOutsideInitiative'
+            removedPolicyReferences = @('AI_AccountKinds', 'AI_DeploymentSkus', 'AI_VirtualNetworkRules', 'B05', 'B12', 'B13', 'B14', 'B16', 'B17', 'B18', 'B19', 'B20', 'B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B31', 'B32', 'B33', 'B34', 'B35')
         }
         parameters = $initiativeParameters
         policyDefinitions = $references.ToArray()
@@ -312,7 +308,7 @@ function Get-PolicyFields {
 }
 
 function Confirm-ManagedResource {
-    param([string]$ResourceId)
+    param([string]$ResourceId, [switch]$PassThru)
 
     $existing = Invoke-PolicyRequest -Method GET -Path "${ResourceId}?api-version=2023-04-01" -AllowNotFound
     if ($null -ne $existing -and
@@ -321,6 +317,7 @@ function Confirm-ManagedResource {
             $existing.properties.metadata.managedBy -ne 'azurethings-ai-governance')) {
         throw "Refusing to overwrite an unrelated resource: $ResourceId. Choose a different name/prefix."
     }
+    if ($PassThru) { return $existing }
 }
 
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'built-in-references.json') -Raw | ConvertFrom-Json -AsHashtable
@@ -398,12 +395,13 @@ foreach ($providerName in @($fields | ForEach-Object { $_.Split('/')[0] } | Sort
         if ($field -notin $aliases) { throw "Azure Policy alias unavailable in the target: $field. No writes performed." }
     }
 }
-$initiative = New-AuditInitiative -Scope $scope -Prefix $DefinitionPrefix -Name $DisplayName -CustomDefinitions $customDefinitions -SelectedPolicies $selectedPolicies -BuiltInDefinitions $builtInDefinitions
-$initiative.metadata.excludedBuiltInReferences = @($manifest.assignmentProfile.excludedReferences.Keys) + @($ExcludeBuiltInReference)
 foreach ($fileName in $customDefinitions.Keys) {
     Confirm-ManagedResource "$scope/providers/Microsoft.Authorization/policyDefinitions/$DefinitionPrefix-$fileName"
 }
-Confirm-ManagedResource $initiativeId
+$existingInitiative = Confirm-ManagedResource $initiativeId -PassThru
+$existingParameters = if ($null -ne $existingInitiative -and $existingInitiative.properties.Contains('parameters')) { $existingInitiative.properties.parameters } else { @{} }
+$initiative = New-AuditInitiative -Scope $scope -Prefix $DefinitionPrefix -Name $DisplayName -CustomDefinitions $customDefinitions -SelectedPolicies $selectedPolicies -BuiltInDefinitions $builtInDefinitions -ExistingParameters $existingParameters
+$initiative.metadata.excludedBuiltInReferences = @($manifest.assignmentProfile.excludedReferences.Keys) + @($ExcludeBuiltInReference)
 
 $parameterSummary = @($initiative.parameters.GetEnumerator() | ForEach-Object {
     [pscustomobject]@{ Name = $_.Key; Type = $_.Value.type; Required = -not $_.Value.Contains('defaultValue') }

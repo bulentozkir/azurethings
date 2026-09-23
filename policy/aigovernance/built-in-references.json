@@ -5,14 +5,36 @@
   "defaultEffectParameter": "effect",
   "assignmentProfile": {
     "mode": "AuditOnly",
+    "baseline": "CoreSecurity",
+    "description": "Low-maintenance organizational baseline: regions, approved public IPs and trusted-service bypass, private connectivity, keyless identity, diagnostic configuration, and the seven AI tags. Not a universal Microsoft or regulatory mandatory-policy list.",
     "permittedEffects": ["Audit", "AuditIfNotExists"],
     "excludedReferences": {
       "B02": "Private-only Search overlay conflicts with the standard approved-IP public-access baseline.",
       "B03": "Private-only ML overlay conflicts with the standard approved-IP public-access baseline.",
+      "B05": "Duplicate network-default checks: the included custom public-IP policy already checks restrictive defaults and approved IP rules for these services.",
       "B08": "No supported audit effect; private DNS assessment needs a separate audit implementation.",
-      "B15": "No supported audit effect; use B14 for the Search CMK assessment.",
+      "B12": "User-assigned versus system-assigned identity is an architecture choice, not a universal security requirement.",
+      "B13": "Customer-managed keys require a separate compliance requirement and key-management operating model; not part of the common baseline.",
+      "B14": "Search customer-managed keys are optional compliance hardening, not a universal requirement for encryption at rest.",
+      "B15": "No supported audit effect; optional Search CMK assessment is outside this baseline.",
+      "B16": "ML customer-managed keys are optional compliance hardening requiring a separate key-management operating model.",
+      "B17": "Customer-owned storage is service- and workload-specific; it is not required for every AI resource.",
+      "B18": "Excluded from the mandatory baseline: maintaining approved model publishers and asset IDs is a workload-specific review, not a stable platform control.",
+      "B19": "Excluded from the mandatory baseline: model-provider and preview eligibility choices belong to workload approval, not the common platform baseline.",
+      "B20": "Excluded from the mandatory baseline: approved ML registry-model publishers and asset IDs require ongoing model-catalogue maintenance.",
       "B21": "No supported audit effect; source registry assessment needs a separate audit implementation.",
-      "B37": "System Policy built-in. Azure rejected it as a member of a custom policy set with InvalidCreatePolicySetDefinitionRequest on 2026-09-23; the account-kind custom rule remains necessary."
+      "B22": "Preview per-category prompt-filter tuning is workload/model-specific and generates excessive central-baseline configuration.",
+      "B23": "Preview per-category response-filter tuning is workload/model-specific; safety validation belongs to the workload release process.",
+      "B24": "Preview per-category severity, enabled, and blocking choices require workload-specific safety decisions, not a universal central configuration.",
+      "B25": "Streaming filter mode is a workload latency/safety design choice, not a mandatory platform setting.",
+      "B26": "Removed from the initiative at the user's request, including all expanded agent prompt-filter references.",
+      "B27": "Removed from the initiative at the user's request, including all expanded agent harmful-content references.",
+      "B31": "A universal Log Analytics destination is not required. Retain the basic diagnostic-configuration checks B28/B29/B30 without a central workspace parameter.",
+      "B32": "Compute-image recreation is operational lifecycle management, not a common resource-configuration gate.",
+      "B33": "A Private Link-capable SKU is a prerequisite for the included endpoint check; a separate SKU finding adds little baseline value.",
+      "B34": "Zone redundancy is a workload availability/SLA choice, not mandatory for all Search services.",
+      "B35": "Idle shutdown is cost optimization and workload scheduling, not a universal security control.",
+      "B37": "System Policy built-in ineligible for a custom initiative. The former custom account-kind allowlist is now also excluded from the core baseline and retained only as a standalone file."
     }
   },
   "sources": {
@@ -50,6 +72,7 @@
     },
     {
       "reference": "B42",
+      "fixedParameters": { "excludedManagedByResourceProviders": [] },
       "controlIds": ["AI-GOV-014"],
       "displayName": "Storage accounts should use private link",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/6edd7eda-6dd8-40f7-810d-67160c639cd9",
@@ -59,7 +82,7 @@
       "recommendedInitialEffect": "AuditIfNotExists",
       "source": "catalogue",
       "definitionSource": "https://management.azure.com/providers/Microsoft.Authorization/policyDefinitions/6edd7eda-6dd8-40f7-810d-67160c639cd9?api-version=2023-04-01",
-      "notes": "Requires an Approved storage private endpoint connection. The managed-service exclusion array defaults to empty, so all storage accounts are evaluated unless the customer explicitly selects exclusions. One connection does not prove every blob/dfs/file/queue/table subresource is covered."
+      "notes": "Requires an Approved storage private endpoint connection. Core baseline fixes the managed-service exclusion array to empty; use reviewed scope/exemptions for exceptions. One connection does not prove every blob/dfs/file/queue/table subresource is covered."
     },
     {
       "reference": "B43",
@@ -365,6 +388,7 @@
     },
     {
       "reference": "B06",
+      "fixedParameters": { "isolationMode": "AllowOnlyApprovedOutbound" },
       "controlIds": ["AI-GOV-016"],
       "displayName": "Azure Machine Learning and Ai Studio should use Allow Only Approved Outbound Managed Vnet mode",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/6ddb1705-c8cf-450e-aa4b-19ad6703c440",
@@ -373,7 +397,8 @@
       "documentedEffects": ["Audit", "Deny", "Disabled"],
       "recommendedInitialEffect": "Audit",
       "source": "ml",
-      "definitionSource": "https://github.com/Azure/azure-policy/blob/master/built-in-policies/policyDefinitions/Machine%20Learning/ManagedNetworkIsolationMode_Audit.json"
+      "definitionSource": "https://github.com/Azure/azure-policy/blob/master/built-in-policies/policyDefinitions/Machine%20Learning/ManagedNetworkIsolationMode_Audit.json",
+      "notes": "Core reference fixes isolationMode to AllowOnlyApprovedOutbound, not the built-in's Disabled mode default. Audit only; does not configure the managed network or approve individual outbound exceptions."
     },
     {
       "reference": "B07",
@@ -567,7 +592,6 @@
     },
     {
       "reference": "B22",
-      "expandByParameter": "filterName",
       "controlIds": ["AI-GOV-051"],
       "displayName": "[Preview]: Cognitive Services Deployments should only use allowed prompt content filtering",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/f3a9c2e0-7b4d-4d8f-9c3a-2e1f6b9a8d4e",
@@ -580,7 +604,6 @@
     },
     {
       "reference": "B23",
-      "expandByParameter": "filterName",
       "controlIds": ["AI-GOV-051"],
       "displayName": "[Preview]: Cognitive Services Deployments should only use allowed completion content filtering",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/af253d37-136a-42f8-a1fc-30010c083d41",
@@ -593,7 +616,6 @@
     },
     {
       "reference": "B24",
-      "expandByParameter": "filterName",
       "controlIds": ["AI-GOV-051"],
       "displayName": "[Preview]: Cognitive Services Deployments should only use allowed control",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/930f48f9-f07e-427c-9494-52603581c6a9",
@@ -618,7 +640,6 @@
     },
     {
       "reference": "B26",
-      "expandByParameter": "filterName",
       "controlIds": ["AI-GOV-055"],
       "displayName": "[Preview]: Cognitive Services Agents should only use allowed prompt content filtering",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/9224c1cc-34fc-44f1-ad08-5c4b079c9ce6",
@@ -631,7 +652,6 @@
     },
     {
       "reference": "B27",
-      "expandByParameter": "filterName",
       "controlIds": ["AI-GOV-055"],
       "displayName": "[Preview]: Cognitive Services Agents should only use allowed control",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/595f98a5-b562-4ab6-b9c8-2ff9f39a3f7c",
@@ -656,6 +676,7 @@
     },
     {
       "reference": "B29",
+      "fixedParameters": { "requiredRetentionDays": "0" },
       "controlIds": ["AI-GOV-071"],
       "displayName": "Resource logs in Azure Machine Learning Workspaces should be enabled",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/afe0c3be-ba3b-4544-ba52-0c99672a8ad6",
@@ -668,6 +689,7 @@
     },
     {
       "reference": "B30",
+      "fixedParameters": { "requiredRetentionDays": "0" },
       "controlIds": ["AI-GOV-071"],
       "displayName": "Resource logs in Search services should be enabled",
       "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/b4330a05-a843-4bc8-bf9a-cacce50c67f4",
