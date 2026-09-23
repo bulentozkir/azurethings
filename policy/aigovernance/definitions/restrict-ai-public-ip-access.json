@@ -1,0 +1,116 @@
+{
+  "displayName": "Azure AI public IP access should use approved addresses",
+  "description": "Audit or deny enabled public access on Cognitive Services, Search, and ML workspaces unless IP rules are approved and firewall defaults are restrictive. Separate policies assess VNet rules and trusted-service bypass. Disabled public access is compliant. Exact IP/CIDR membership, not containment. Audit is the default; Deny affects resource writes, not live traffic.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-011"],
+    "sources": [
+      "https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks",
+      "https://learn.microsoft.com/azure/search/service-configure-firewall",
+      "https://learn.microsoft.com/azure/machine-learning/how-to-configure-private-link"
+    ]
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "allowedIpRules": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved public IPv4 addresses or CIDRs",
+        "description": "Supply exact rule strings as stored by the provider. No CIDR-containment inference. Empty approves no IP exceptions. /0 and wildcard rules always report noncompliance."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "anyOf": [
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+            { "field": "Microsoft.CognitiveServices/accounts/publicNetworkAccess", "notEquals": "Disabled" },
+            {
+              "anyOf": [
+                { "field": "Microsoft.CognitiveServices/accounts/publicNetworkAccess", "notEquals": "Enabled" },
+                { "field": "Microsoft.CognitiveServices/accounts/networkAcls.defaultAction", "notEquals": "Deny" },
+                {
+                  "count": {
+                    "field": "Microsoft.CognitiveServices/accounts/networkAcls.ipRules[*]",
+                    "where": {
+                      "anyOf": [
+                        { "field": "Microsoft.CognitiveServices/accounts/networkAcls.ipRules[*].value", "notIn": "[parameters('allowedIpRules')]" },
+                        { "field": "Microsoft.CognitiveServices/accounts/networkAcls.ipRules[*].value", "like": "*/0" },
+                        { "field": "Microsoft.CognitiveServices/accounts/networkAcls.ipRules[*].value", "equals": "*" }
+                      ]
+                    }
+                  },
+                  "greater": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.Search/searchServices" },
+            { "field": "Microsoft.Search/searchServices/publicNetworkAccess", "notEquals": "Disabled" },
+            {
+              "anyOf": [
+                { "field": "Microsoft.Search/searchServices/publicNetworkAccess", "notEquals": "Enabled" },
+                { "count": { "field": "Microsoft.Search/searchServices/networkRuleSet.ipRules[*]" }, "equals": 0 },
+                {
+                  "count": {
+                    "field": "Microsoft.Search/searchServices/networkRuleSet.ipRules[*]",
+                    "where": {
+                      "anyOf": [
+                        { "field": "Microsoft.Search/searchServices/networkRuleSet.ipRules[*].value", "notIn": "[parameters('allowedIpRules')]" },
+                        { "field": "Microsoft.Search/searchServices/networkRuleSet.ipRules[*].value", "like": "*/0" },
+                        { "field": "Microsoft.Search/searchServices/networkRuleSet.ipRules[*].value", "equals": "*" }
+                      ]
+                    }
+                  },
+                  "greater": 0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces" },
+            { "field": "Microsoft.MachineLearningServices/workspaces/publicNetworkAccess", "notEquals": "Disabled" },
+            {
+              "anyOf": [
+                { "field": "Microsoft.MachineLearningServices/workspaces/publicNetworkAccess", "notEquals": "Enabled" },
+                { "field": "Microsoft.MachineLearningServices/workspaces/networkAcls.defaultAction", "notEquals": "Deny" },
+                {
+                  "count": {
+                    "field": "Microsoft.MachineLearningServices/workspaces/networkAcls.ipRules[*]",
+                    "where": {
+                      "anyOf": [
+                        { "field": "Microsoft.MachineLearningServices/workspaces/networkAcls.ipRules[*].value", "notIn": "[parameters('allowedIpRules')]" },
+                        { "field": "Microsoft.MachineLearningServices/workspaces/networkAcls.ipRules[*].value", "like": "*/0" },
+                        { "field": "Microsoft.MachineLearningServices/workspaces/networkAcls.ipRules[*].value", "equals": "*" }
+                      ]
+                    }
+                  },
+                  "greater": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

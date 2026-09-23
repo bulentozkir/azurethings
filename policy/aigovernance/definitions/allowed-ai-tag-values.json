@@ -1,0 +1,79 @@
+{
+  "displayName": "Azure AI governance tags should use approved values",
+  "description": "Audit or deny core Azure AI resources when a selected tag is missing, empty, or outside an approved value list. This validates the label, not the underlying risk or behavior. Audit is the default; Deny requires explicit selection.",
+  "policyType": "Custom",
+  "mode": "Indexed",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-004", "AI-GOV-005", "AI-GOV-006", "AI-GOV-007", "AI-GOV-101", "AI-GOV-102"]
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "resourceTypes": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Azure AI resource types",
+        "description": "Target parent resource types that support tags. Extend deliberately for supporting services."
+      },
+      "defaultValue": [
+        "Microsoft.CognitiveServices/accounts",
+        "Microsoft.MachineLearningServices/workspaces",
+        "Microsoft.MachineLearningServices/registries",
+        "Microsoft.Search/searchServices",
+        "Microsoft.BotService/botServices"
+      ]
+    },
+    "tagName": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Governance tag name",
+        "description": "Assign separately for ai-role, ai-usage, ai-audience, ai-sharing, ai-autonomy, and ai-risk, using the corresponding values from the tag baseline."
+      }
+    },
+    "allowedTagValues": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved tag values",
+        "description": "Supply at least one approved, nonempty value. Tag presence and nonempty content are required independently of this list."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "in": "[parameters('resourceTypes')]"
+        },
+        {
+          "anyOf": [
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "exists": "false"
+            },
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "equals": ""
+            },
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "notIn": "[parameters('allowedTagValues')]"
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

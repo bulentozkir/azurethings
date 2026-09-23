@@ -1,0 +1,74 @@
+{
+  "displayName": "Foundry accounts should have agent VNet injection configured",
+  "description": "Audit or deny project-enabled AIServices accounts without an agent network injection into a customer subnet. Requires scenario agent, a nonempty subnetArmId, and no Microsoft-managed-network flag on the same entry. Does not validate subnet delegation, routing, or agent connectivity. OpenAI-only accounts and ML hubs use separate controls. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-103"],
+    "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts#networkinjection",
+    "builtInReview": {
+      "reviewedOn": "2026-09-23",
+      "gap": "No live built-in inspecting Cognitive Services networkInjections was found. ML managed-network isolation and private-endpoint presence do not establish Foundry agent subnet injection."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports missing customer-subnet agent injection by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.CognitiveServices/accounts"
+        },
+        {
+          "field": "kind",
+          "equals": "AIServices"
+        },
+        {
+          "field": "Microsoft.CognitiveServices/accounts/allowProjectManagement",
+          "equals": true
+        },
+        {
+          "count": {
+            "field": "Microsoft.CognitiveServices/accounts/networkInjections[*]",
+            "where": {
+              "allOf": [
+                {
+                  "field": "Microsoft.CognitiveServices/accounts/networkInjections[*].scenario",
+                  "equals": "agent"
+                },
+                {
+                  "field": "Microsoft.CognitiveServices/accounts/networkInjections[*].subnetArmId",
+                  "exists": "true"
+                },
+                {
+                  "field": "Microsoft.CognitiveServices/accounts/networkInjections[*].subnetArmId",
+                  "notEquals": ""
+                },
+                {
+                  "field": "Microsoft.CognitiveServices/accounts/networkInjections[*].useMicrosoftManagedNetwork",
+                  "notEquals": true
+                }
+              ]
+            }
+          },
+          "less": 1
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

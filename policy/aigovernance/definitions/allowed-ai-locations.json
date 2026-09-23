@@ -1,0 +1,100 @@
+{
+  "displayName": "Azure AI resources should use approved locations",
+  "description": "Audit or deny selected AI services, location-bearing ML children, and common AI hosting/data dependencies outside approved ARM locations. Shared types are checked even when not used for AI; scope assignments appropriately. This does not govern processing geography, computeLocation, or replication. Audit is the default; Deny requires explicit selection.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "2.0.0",
+    "controlIds": ["AI-GOV-001"]
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "resourceTypes": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "AI service and supporting resource types",
+        "description": "Exact location-bearing ARM types to assess, including common shared infrastructure. Not an AI-use detector. Narrow this list or assignment scope to avoid assessing unrelated workloads. Child types are listed explicitly."
+      },
+      "defaultValue": [
+        "Microsoft.CognitiveServices/accounts",
+        "Microsoft.CognitiveServices/accounts/projects",
+        "Microsoft.MachineLearningServices/workspaces",
+        "Microsoft.MachineLearningServices/workspaces/computes",
+        "Microsoft.MachineLearningServices/workspaces/onlineEndpoints",
+        "Microsoft.MachineLearningServices/workspaces/onlineEndpoints/deployments",
+        "Microsoft.MachineLearningServices/workspaces/batchEndpoints",
+        "Microsoft.MachineLearningServices/workspaces/batchEndpoints/deployments",
+        "Microsoft.MachineLearningServices/workspaces/serverlessEndpoints",
+        "Microsoft.MachineLearningServices/registries",
+        "Microsoft.Search/searchServices",
+        "Microsoft.BotService/botServices",
+        "Microsoft.VideoIndexer/accounts",
+        "Microsoft.HealthBot/healthBots",
+        "Microsoft.HealthDataAIServices/deidServices",
+        "Microsoft.Databricks/workspaces",
+        "Microsoft.ContainerService/managedClusters",
+        "Microsoft.Compute/virtualMachines",
+        "Microsoft.Compute/virtualMachineScaleSets",
+        "Microsoft.App/containerApps",
+        "Microsoft.App/managedEnvironments",
+        "Microsoft.App/jobs",
+        "Microsoft.ContainerInstance/containerGroups",
+        "Microsoft.Web/sites",
+        "Microsoft.Web/serverfarms",
+        "Microsoft.Batch/batchAccounts",
+        "Microsoft.Storage/storageAccounts",
+        "Microsoft.KeyVault/vaults",
+        "Microsoft.KeyVault/managedHSMs",
+        "Microsoft.ContainerRegistry/registries",
+        "Microsoft.DocumentDB/databaseAccounts",
+        "Microsoft.DocumentDB/mongoClusters",
+        "Microsoft.DBforPostgreSQL/flexibleServers",
+        "Microsoft.Sql/servers",
+        "Microsoft.Sql/managedInstances",
+        "Microsoft.Cache/redis",
+        "Microsoft.Cache/redisEnterprise",
+        "Microsoft.ApiManagement/service",
+        "Microsoft.Synapse/workspaces",
+        "Microsoft.DataFactory/factories",
+        "Microsoft.Fabric/capacities",
+        "Microsoft.Purview/accounts",
+        "Microsoft.OperationalInsights/workspaces",
+        "Microsoft.Insights/components"
+      ]
+    },
+    "allowedLocations": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved locations",
+        "description": "Supply at least one approved ARM location. Include global only when explicitly permitted.",
+        "strongType": "location"
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "in": "[parameters('resourceTypes')]"
+        },
+        {
+          "field": "location",
+          "notIn": "[parameters('allowedLocations')]"
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

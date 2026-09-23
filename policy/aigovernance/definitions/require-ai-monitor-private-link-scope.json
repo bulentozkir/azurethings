@@ -1,0 +1,68 @@
+{
+  "displayName": "AI monitoring resources should be linked to an Azure Monitor Private Link Scope",
+  "description": "Audit or deny Log Analytics workspaces and Application Insights components without a recorded Private Link Scope association. Pair with the built-in that checks Approved endpoints on the scope and include both resource locations in the assignment. Membership alone does not prove endpoint approval, DNS, access modes, or connectivity. Audit is the default; Deny can block creation before the service records a scope association.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-014"],
+    "source": "https://learn.microsoft.com/azure/azure-monitor/fundamentals/private-link-security",
+    "builtInReview": {
+      "reviewedOn": "2026-09-23",
+      "gap": "The live catalogue contains an endpoint-existence built-in for Microsoft.Insights/privateLinkScopes but no equivalent scope-membership audit for Log Analytics workspaces or Application Insights components. Their privateLinkScopedResources array and scopeId aliases were verified."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports missing recorded scope membership. Deny can prevent initial creation before a Private Link Scope association can be added."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "anyOf": [
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.OperationalInsights/workspaces" },
+            {
+              "count": {
+                "field": "Microsoft.OperationalInsights/workspaces/privateLinkScopedResources[*]",
+                "where": {
+                  "allOf": [
+                    { "field": "Microsoft.OperationalInsights/workspaces/privateLinkScopedResources[*].scopeId", "exists": "true" },
+                    { "field": "Microsoft.OperationalInsights/workspaces/privateLinkScopedResources[*].scopeId", "notEquals": "" }
+                  ]
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.Insights/components" },
+            {
+              "count": {
+                "field": "Microsoft.Insights/components/PrivateLinkScopedResources[*]",
+                "where": {
+                  "allOf": [
+                    { "field": "Microsoft.Insights/components/PrivateLinkScopedResources[*].ScopeId", "exists": "true" },
+                    { "field": "Microsoft.Insights/components/PrivateLinkScopedResources[*].ScopeId", "notEquals": "" }
+                  ]
+                }
+              },
+              "less": 1
+            }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

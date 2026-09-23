@@ -1,0 +1,47 @@
+{
+  "displayName": "Azure AI model deployments should use approved deployment SKUs",
+  "description": "Audit or deny Cognitive Services child model deployments with unapproved SKU names. Use an explicit allowlist to assess regional, Data Zone, and Global deployment choices. This does not govern ML endpoints, external providers, or runtime fallback routing. Audit is the default; Deny requires explicit selection.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-010"],
+    "source": "https://learn.microsoft.com/azure/foundry/foundry-models/concepts/deployment-types#restrict-deployment-types-with-azure-policy"
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "allowedDeploymentSkus": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved model deployment SKUs",
+        "description": "Supply exact approved SKU names from the target service. Validate each SKU's processing geography, model support, and regional availability. An empty list allows no deployment SKUs."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.CognitiveServices/accounts/deployments"
+        },
+        {
+          "field": "Microsoft.CognitiveServices/accounts/deployments/sku.name",
+          "notIn": "[parameters('allowedDeploymentSkus')]"
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

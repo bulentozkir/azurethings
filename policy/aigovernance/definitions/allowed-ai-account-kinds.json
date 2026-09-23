@@ -1,0 +1,51 @@
+{
+  "displayName": "Azure AI accounts should use approved service kinds",
+  "description": "Audit or deny Cognitive Services accounts whose kind is not explicitly approved. This governs service account kinds, not individual models, tools, or agent capabilities. Audit is the default; Deny requires explicit selection.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-002"],
+    "builtInReview": {
+      "reviewedOn": "2026-09-23",
+      "policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/c9623da8-5301-401e-9ca8-69396833b6f3",
+      "gap": "Azure rejected the equivalent System Policy built-in inside a custom policy set with InvalidCreatePolicySetDefinitionRequest. Retain a custom rule for the reusable audit initiative."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "allowedKinds": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved AI account kinds",
+        "description": "Supply the exact approved account kinds, such as OpenAI or AIServices. An empty list allows no Cognitive Services account kinds."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "equals": "Microsoft.CognitiveServices/accounts"
+        },
+        {
+          "field": "kind",
+          "notIn": "[parameters('allowedKinds')]"
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "displayName": "AI resources and dependencies should have approved private endpoints",
+  "description": "Supplemental check for ML registries, Video Indexer, Container Apps environments, API Management, MongoDB clusters, and SQL managed instances without an Approved private endpoint connection. Other AI services and dependencies reuse built-ins in the initiative. Checks existence, not DNS, routing, or public access. Audit is the default; Deny can impede initial provisioning before connection approval. Review SKU and alternative VNet-access designs before assignment.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "2.0.0",
+    "controlIds": ["AI-GOV-014"],
+    "builtInReview": {
+      "reviewedOn": "2026-09-23",
+      "gap": "No equivalent audit-capable private-endpoint-existence built-in was found for ML registries, Video Indexer, Container Apps environments, API Management, MongoDB clusters, or SQL managed instances in the 2,862-definition live catalogue. Endpoint array and Approved-status aliases were verified. Other resource types reuse built-ins; Monitor scope membership is a separate rule."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports missing Approved connections by default. Deny requires explicit selection and can block resource creation before a private connection can be approved."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.MachineLearningServices/registries"
+            },
+            {
+              "count": {
+                "field": "Microsoft.MachineLearningServices/registries/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.MachineLearningServices/registries/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            },
+            {
+              "count": {
+                "field": "Microsoft.MachineLearningServices/registries/registryPrivateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.MachineLearningServices/registries/registryPrivateEndpointConnections[*].registryPrivateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.VideoIndexer/accounts"
+            },
+            {
+              "count": {
+                "field": "Microsoft.VideoIndexer/accounts/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.VideoIndexer/accounts/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.App/managedEnvironments"
+            },
+            {
+              "count": {
+                "field": "Microsoft.App/managedEnvironments/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.App/managedEnvironments/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.ApiManagement/service"
+            },
+            {
+              "count": {
+                "field": "Microsoft.ApiManagement/service/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.ApiManagement/service/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.DocumentDB/mongoClusters"
+            },
+            {
+              "count": {
+                "field": "Microsoft.DocumentDB/mongoClusters/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.DocumentDB/mongoClusters/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "field": "type",
+              "equals": "Microsoft.Sql/managedInstances"
+            },
+            {
+              "count": {
+                "field": "Microsoft.Sql/managedInstances/privateEndpointConnections[*]",
+                "where": {
+                  "field": "Microsoft.Sql/managedInstances/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+                  "equals": "Approved"
+                }
+              },
+              "less": 1
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

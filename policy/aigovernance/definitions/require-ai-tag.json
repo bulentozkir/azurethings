@@ -1,0 +1,68 @@
+{
+  "displayName": "Azure AI resources should have a required governance tag",
+  "description": "Audit or deny core Azure AI resources when a selected tag is absent or empty. Assign separately for each required tag. This does not validate the tag's accuracy. Audit is the default; Deny requires explicit selection.",
+  "policyType": "Custom",
+  "mode": "Indexed",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-003"]
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "resourceTypes": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Azure AI resource types",
+        "description": "Target parent resource types that support tags. Extend deliberately for supporting services."
+      },
+      "defaultValue": [
+        "Microsoft.CognitiveServices/accounts",
+        "Microsoft.MachineLearningServices/workspaces",
+        "Microsoft.MachineLearningServices/registries",
+        "Microsoft.Search/searchServices",
+        "Microsoft.BotService/botServices"
+      ]
+    },
+    "tagName": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Required tag name",
+        "description": "Use ai-workload to group an AI solution and its supporting resources. Its value is a nonempty workload identifier, such as support-chatbot."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "field": "type",
+          "in": "[parameters('resourceTypes')]"
+        },
+        {
+          "anyOf": [
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "exists": "false"
+            },
+            {
+              "field": "[concat('tags[', parameters('tagName'), ']')]",
+              "equals": ""
+            }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

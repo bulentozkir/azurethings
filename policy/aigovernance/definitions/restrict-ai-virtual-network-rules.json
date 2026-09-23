@@ -1,0 +1,48 @@
+{
+  "displayName": "Azure AI virtual network rules should use approved subnets",
+  "description": "Audit or deny Cognitive Services accounts with configured VNet rules outside approved subnet resource IDs, including dormant rules while public access is disabled. Does not require a VNet rule when IP rules or private endpoints are used. Checks rule configuration, not subnet existence, service endpoints, or Foundry VNet injection. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-104"],
+    "source": "https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks"
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "allowedSubnetIds": {
+      "type": "Array",
+      "metadata": {
+        "displayName": "Approved Cognitive Services subnet resource IDs",
+        "description": "Supply full subnet resource IDs, not just VNet IDs or names. Empty approves no configured VNet rules. Search and ML workspaces do not use this Cognitive Services subnet-rule property."
+      }
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+        {
+          "count": {
+            "field": "Microsoft.CognitiveServices/accounts/networkAcls.virtualNetworkRules[*]",
+            "where": {
+              "field": "Microsoft.CognitiveServices/accounts/networkAcls.virtualNetworkRules[*].id",
+              "notIn": "[parameters('allowedSubnetIds')]"
+            }
+          },
+          "greater": 0
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

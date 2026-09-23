@@ -1,0 +1,95 @@
+{
+  "displayName": "Azure AI trusted-service bypass should match the approved setting",
+  "description": "Audit or deny Cognitive Services and Search accounts whose trusted-service bypass is not approved. AzureServices is allowed only when allowTrustedServices is true; the default is false. Requires an explicit supported bypass value when public access is Enabled. Does not validate the trusted caller's identity or RBAC. Independent from IP, VNet, and private-endpoint checks.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-105"],
+    "sources": [
+      "https://learn.microsoft.com/azure/ai-services/cognitive-services-virtual-networks",
+      "https://learn.microsoft.com/azure/search/service-configure-firewall#grant-access-to-trusted-azure-services"
+    ]
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports noncompliance by default. Deny blocks noncompliant create or update requests when explicitly selected."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    },
+    "allowTrustedServices": {
+      "type": "Boolean",
+      "metadata": {
+        "displayName": "Allow trusted Azure services to bypass network rules",
+        "description": "False requires no trusted-service bypass. True permits AzureServices as well as None; it does not require or enable bypass. Approve the service-specific trust and RBAC boundary separately."
+      },
+      "defaultValue": false
+    }
+  },
+  "policyRule": {
+    "if": {
+      "anyOf": [
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+            {
+              "anyOf": [
+                {
+                  "allOf": [
+                    { "field": "Microsoft.CognitiveServices/accounts/publicNetworkAccess", "equals": "Enabled" },
+                    { "field": "Microsoft.CognitiveServices/accounts/networkAcls.bypass", "exists": "false" }
+                  ]
+                },
+                {
+                  "allOf": [
+                    { "field": "Microsoft.CognitiveServices/accounts/networkAcls.bypass", "exists": "true" },
+                    { "field": "Microsoft.CognitiveServices/accounts/networkAcls.bypass", "notIn": ["None", "AzureServices"] }
+                  ]
+                },
+                {
+                  "allOf": [
+                    { "field": "Microsoft.CognitiveServices/accounts/networkAcls.bypass", "equals": "AzureServices" },
+                    { "value": "[parameters('allowTrustedServices')]", "equals": false }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "field": "type", "equals": "Microsoft.Search/searchServices" },
+            {
+              "anyOf": [
+                {
+                  "allOf": [
+                    { "field": "Microsoft.Search/searchServices/publicNetworkAccess", "equals": "Enabled" },
+                    { "field": "Microsoft.Search/searchServices/networkRuleSet.bypass", "exists": "false" }
+                  ]
+                },
+                {
+                  "allOf": [
+                    { "field": "Microsoft.Search/searchServices/networkRuleSet.bypass", "exists": "true" },
+                    { "field": "Microsoft.Search/searchServices/networkRuleSet.bypass", "notIn": ["None", "AzureServices"] }
+                  ]
+                },
+                {
+                  "allOf": [
+                    { "field": "Microsoft.Search/searchServices/networkRuleSet.bypass", "equals": "AzureServices" },
+                    { "value": "[parameters('allowTrustedServices')]", "equals": false }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}
