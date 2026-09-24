@@ -99,7 +99,7 @@ function Test-PolicyCondition {
         throw 'Unsupported condition in offline fixture evaluator.'
     }
 
-    foreach ($operator in @('equals', 'notEquals', 'in', 'notIn', 'greater', 'less', 'like')) {
+    foreach ($operator in @('equals', 'notEquals', 'in', 'notIn', 'greater', 'less', 'like', 'contains', 'notContains')) {
         if ($Condition.Contains($operator)) {
             $expected = Resolve-PolicyLiteral $Condition[$operator] $Parameters
             switch ($operator) {
@@ -110,6 +110,8 @@ function Test-PolicyCondition {
                 'greater' { return $actual -gt $expected }
                 'less' { return $actual -lt $expected }
                 'like' { return $actual -like $expected }
+                'contains' { return ([string]$actual).IndexOf([string]$expected, [StringComparison]::OrdinalIgnoreCase) -ge 0 }
+                'notContains' { return ([string]$actual).IndexOf([string]$expected, [StringComparison]::OrdinalIgnoreCase) -lt 0 }
             }
         }
     }
@@ -125,6 +127,7 @@ function Invoke-RuleCase {
         [System.Collections.IDictionary]$Changes = @{},
         [string[]]$RemoveFields = @(),
         [System.Collections.IDictionary]$ParameterChanges = @{},
+        [object[]]$RelatedResources = @(),
         [bool]$Expected
     )
 
@@ -161,6 +164,16 @@ function Invoke-RuleCase {
 
     $effect = Resolve-PolicyLiteral $definition.policyRule.then.effect $values
     $actual = $effect -ne 'Disabled' -and (Test-PolicyCondition $definition.policyRule.if $caseFields $values)
+    if ($actual -and $effect -eq 'AuditIfNotExists') {
+        $details = $definition.policyRule.then.details
+        foreach ($related in $RelatedResources) {
+            if ($related.Contains('type') -and $related.type -eq $details.type -and
+                (Test-PolicyCondition $details.existenceCondition $related $values)) {
+                $actual = $false
+                break
+            }
+        }
+    }
     Confirm-Assertion ($actual -eq $Expected) "Case '$Name' failed for '$PolicyName': expected match=$Expected, actual=$actual"
     $script:ruleCaseCount++
 }
@@ -225,14 +238,9 @@ foreach ($reference in $manifest.assignmentProfile.excludedReferences.Keys) {
 foreach ($reference in @('B02', 'B03')) {
     Confirm-Assertion ($manifest.assignmentProfile.excludedReferences.Contains($reference)) "Private-only overlay would conflict with approved public-source access: $reference"
 }
-$baselineReferences = @($manifest.policies | Where-Object { -not $manifest.assignmentProfile.excludedReferences.Contains($_.reference) })
-Confirm-Assertion ($baselineReferences.Count -gt 0) 'No audit-capable baseline references selected.'
-foreach ($reference in @('B04', 'B36', 'B38', 'B39', 'B40') + @(41..55 | ForEach-Object { "B$_" })) {
-    Confirm-Assertion ($reference -in @($baselineReferences | ForEach-Object { $_.reference })) "Missing requested private-endpoint-existence audit: $reference"
-}
-foreach ($reference in @('B06', 'B07', 'B56', 'B57')) {
-    Confirm-Assertion ($reference -in @($baselineReferences | ForEach-Object { $_.reference })) "Missing related AI network-isolation audit: $reference"
-}
+$baselineReferences = @($manifest.policies | Where-Object { $_.reference -in $manifest.assignmentProfile.includedReferences })
+Confirm-Assertion ($manifest.assignmentProfile.baseline -eq 'AIPlatformAudit') 'The profile must target the Foundry, Azure ML, and AI services controls.'
+Confirm-Assertion (@($baselineReferences).Count -eq 26) 'Expected 26 selected built-ins.'
 foreach ($reference in [regex]::Matches(($rows.Value -join "`n"), '\bB\d{2}\b')) {
     Confirm-Assertion ($reference.Value -in $manifestReferences) "Undefined built-in reference: $($reference.Value)"
 }
@@ -249,6 +257,13 @@ $expectedModes = @{
     'require-ai-private-endpoints' = 'All'
     'require-ai-monitor-private-link-scope' = 'All'
     'require-foundry-vnet-injection' = 'All'
+    'require-foundry-trusted-services' = 'All'
+    'require-foundry-private-endpoint' = 'All'
+    'require-foundry-key-vault-connection' = 'All'
+    'require-foundry-app-insights-connection' = 'All'
+    'require-ai-system-assigned-identity' = 'All'
+    'require-ai-deployment-content-filter' = 'All'
+    'require-ml-endpoint-entra-auth' = 'All'
 }
 $definitionFiles = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'definitions') -Filter '*.json' -File)
 Confirm-Assertion ($definitionFiles.Count -eq $expectedModes.Count) 'Unexpected number of custom definitions.'
@@ -258,8 +273,10 @@ foreach ($file in $definitionFiles) {
     Confirm-Assertion ($expectedModes.ContainsKey($file.BaseName)) "Untested definition: $($file.Name)"
     Confirm-Assertion ($definition.policyType -eq 'Custom') "Not a custom definition: $($file.Name)"
     Confirm-Assertion ($definition.mode -eq $expectedModes[$file.BaseName]) "Incorrect evaluation mode: $($file.Name)"
-    Confirm-Assertion ($definition.parameters.effect.defaultValue -eq 'Audit') "Unsafe default effect: $($file.Name)"
-    Confirm-Assertion (@(Compare-Object @('Audit', 'Deny') @($definition.parameters.effect.allowedValues)).Count -eq 0) "Custom effect must support Audit and Deny: $($file.Name)"
+    $expectedEffect = if ($definition.policyRule.then.Contains('details')) { 'AuditIfNotExists' } else { 'Audit' }
+    $expectedEffects = if ($expectedEffect -eq 'Audit') { @('Audit', 'Deny') } else { @('AuditIfNotExists', 'Disabled') }
+    Confirm-Assertion ($definition.parameters.effect.defaultValue -eq $expectedEffect) "Unsafe default effect: $($file.Name)"
+    Confirm-Assertion (@(Compare-Object $expectedEffects @($definition.parameters.effect.allowedValues)).Count -eq 0) "Unexpected supported effects: $($file.Name)"
     Confirm-Assertion ($definition.policyRule.then.effect -eq "[parameters('effect')]") "Unparameterized effect: $($file.Name)"
     $ruleJson = $definition.policyRule | ConvertTo-Json -Depth 60
     $usedParameters = @([regex]::Matches($ruleJson, "parameters\('([^']+)'\)") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
@@ -279,7 +296,7 @@ Confirm-Assertion (@($documentedConnectivityTypes | Sort-Object -Unique).Count -
 Confirm-Assertion (@(Compare-Object $expectedConnectivityTypes $documentedConnectivityTypes).Count -eq 0) 'Private-connectivity coverage must account for every location type plus the Monitor scope, including explicit limitations.'
 Confirm-Assertion (@($coverageRows | Where-Object { $_.Groups[2].Value.Trim() -eq 'Endpoint' }).Count -eq 27) 'Unexpected documented endpoint-owning type count.'
 foreach ($reference in [regex]::Matches($coverageSection, '\bB\d{2}\b')) {
-    Confirm-Assertion ($reference.Value -in @($baselineReferences | ForEach-Object { $_.reference })) "Coverage table references an unselected built-in: $($reference.Value)"
+    Confirm-Assertion ($reference.Value -in $manifestReferences) "Archived coverage table references an unknown built-in: $($reference.Value)"
 }
 
 $script:ruleCaseCount = 0
@@ -582,6 +599,128 @@ Invoke-RuleCase @common -Name 'OpenAI-only account outside injection scope' -Cha
 Invoke-RuleCase @common -Name 'non-project AIServices account outside injection scope' -Changes @{ $projectManagementField = $false } -RemoveFields $injectionField -Expected $false
 Invoke-RuleCase @common -Name 'ML hub outside Foundry account injection scope' -Changes @{ type = 'Microsoft.MachineLearningServices/workspaces'; kind = 'Hub' } -RemoveFields $injectionField -Expected $false
 
+$foundryFields = @{ type = $coreType; kind = 'AIServices'; $projectManagementField = $true }
+$bypassField = "$coreType/networkAcls.bypass"
+$trustedFields = $foundryFields.Clone()
+$trustedFields["$coreType/publicNetworkAccess"] = 'Enabled'
+$trustedFields["$coreType/networkAcls.defaultAction"] = 'Deny'
+$common = @{ PolicyName = 'require-foundry-trusted-services'; Fields = $trustedFields }
+Invoke-RuleCase @common -Name 'Foundry trusted access missing' -Expected $true
+Invoke-RuleCase @common -Name 'Foundry trusted access None' -Changes @{ $bypassField = 'None' } -Expected $true
+Invoke-RuleCase @common -Name 'Foundry trusted access enabled' -Changes @{ $bypassField = 'AzureServices' } -Expected $false
+Invoke-RuleCase @common -Name 'Trusted exception does not permit unrestricted public access' -Changes @{ $bypassField = 'AzureServices'; "$coreType/networkAcls.defaultAction" = 'Allow' } -Expected $true
+Invoke-RuleCase @common -Name 'Trusted exception needs explicit public firewall default' -Changes @{ $bypassField = 'AzureServices' } -RemoveFields "$coreType/networkAcls.defaultAction" -Expected $true
+Invoke-RuleCase @common -Name 'Trusted exception needs explicit public-access state' -Changes @{ $bypassField = 'AzureServices' } -RemoveFields "$coreType/publicNetworkAccess" -Expected $true
+Invoke-RuleCase @common -Name 'Private-only trusted configuration does not need a public firewall default' -Changes @{ $bypassField = 'AzureServices'; "$coreType/publicNetworkAccess" = 'Disabled' } -RemoveFields "$coreType/networkAcls.defaultAction" -Expected $false
+Invoke-RuleCase @common -Name 'Foundry unknown bypass is not trusted access' -Changes @{ $bypassField = 'AllServices' } -Expected $true
+Invoke-RuleCase @common -Name 'Public access disabled does not invent trusted exception' -Changes @{ "$coreType/publicNetworkAccess" = 'Disabled' } -Expected $true
+Invoke-RuleCase @common -Name 'Trusted exception does not require unrestricted public access' -Changes @{ $bypassField = 'AzureServices'; "$coreType/publicNetworkAccess" = 'Disabled' } -Expected $false
+Invoke-RuleCase @common -Name 'Trusted exception excludes OpenAI-only accounts' -Changes @{ kind = 'OpenAI' } -Expected $false
+Invoke-RuleCase @common -Name 'Trusted exception excludes non-project AIServices' -Changes @{ $projectManagementField = $false } -Expected $false
+Invoke-RuleCase @common -Name 'Trusted exception excludes missing project marker' -RemoveFields $projectManagementField -Expected $false
+Invoke-RuleCase @common -Name 'Trusted exception excludes ML hubs' -Changes @{ type = 'Microsoft.MachineLearningServices/workspaces' } -Expected $false
+
+$peField = "$coreType/privateEndpointConnections[*]"
+$approvedConnection = @{ 'privateLinkServiceConnectionState.status' = 'Approved' }
+$common = @{ PolicyName = 'require-foundry-private-endpoint'; Fields = $foundryFields }
+Invoke-RuleCase @common -Name 'Foundry private endpoint missing' -Expected $true
+Invoke-RuleCase @common -Name 'Foundry empty private endpoint list' -Changes @{ $peField = @() } -Expected $true
+Invoke-RuleCase @common -Name 'Foundry approved private endpoint' -Changes @{ $peField = @($approvedConnection) } -Expected $false
+Invoke-RuleCase @common -Name 'Foundry pending private endpoint only' -Changes @{ $peField = @(@{ 'privateLinkServiceConnectionState.status' = 'Pending' }) } -Expected $true
+Invoke-RuleCase @common -Name 'Foundry rejected plus approved endpoint' -Changes @{ $peField = @(@{ 'privateLinkServiceConnectionState.status' = 'Rejected' }, $approvedConnection) } -Expected $false
+Invoke-RuleCase @common -Name 'Disabled public access does not replace a private endpoint' -Changes @{ "$coreType/publicNetworkAccess" = 'Disabled' } -Expected $true
+Invoke-RuleCase @common -Name 'Private endpoint check excludes OpenAI-only accounts' -Changes @{ kind = 'OpenAI' } -Expected $false
+Invoke-RuleCase @common -Name 'Private endpoint check excludes other Cognitive Services kinds' -Changes @{ kind = 'SpeechServices' } -Expected $false
+Invoke-RuleCase @common -Name 'Private endpoint check excludes non-project AIServices' -Changes @{ $projectManagementField = $false } -Expected $false
+Invoke-RuleCase @common -Name 'Private endpoint check excludes Azure AI Search' -Changes @{ type = 'Microsoft.Search/searchServices' } -Expected $false
+Invoke-RuleCase @common -Name 'Private endpoint Deny option' -ParameterChanges @{ effect = 'Deny' } -Expected $true
+
+foreach ($connectionCase in @(
+    @{ policy = 'require-foundry-key-vault-connection'; category = 'AzureKeyVault' }
+)) {
+    $connectionType = "$coreType/connections"
+    $categoryField = "$connectionType/category"
+    $targetField = "$connectionType/target"
+    $related = @{ type = $connectionType; $categoryField = $connectionCase.category; $targetField = 'https://connection.example.invalid' }
+    $common = @{ PolicyName = $connectionCase.policy; Fields = $foundryFields }
+    Invoke-RuleCase @common -Name "$($connectionCase.category) missing connection" -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) connection present" -RelatedResources @($related) -Expected $false
+    Invoke-RuleCase @common -Name "$($connectionCase.category) wrong category" -RelatedResources @(@{ type = $connectionType; $categoryField = 'AzureBlob'; $targetField = 'https://example.invalid' }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) missing target" -RelatedResources @(@{ type = $connectionType; $categoryField = $connectionCase.category }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) empty target" -RelatedResources @(@{ type = $connectionType; $categoryField = $connectionCase.category; $targetField = '' }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) null target" -RelatedResources @(@{ type = $connectionType; $categoryField = $connectionCase.category; $targetField = $null }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) target and category must belong to same connection" -RelatedResources @(@{ type = $connectionType; $categoryField = $connectionCase.category }, @{ type = $connectionType; $categoryField = 'AzureBlob'; $targetField = 'https://example.invalid' }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) one valid connection among others" -RelatedResources @(@{ type = $connectionType; $categoryField = 'AzureBlob' }, $related) -Expected $false
+    $projectConnection = $related.Clone()
+    $projectConnection.type = "$coreType/projects/connections"
+    Invoke-RuleCase @common -Name "$($connectionCase.category) project-only connection is outside account-level contract" -RelatedResources @($projectConnection) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) standalone resource is not integration" -RelatedResources @(@{ type = 'Microsoft.KeyVault/vaults' }, @{ type = 'Microsoft.Insights/components' }) -Expected $true
+    Invoke-RuleCase @common -Name "$($connectionCase.category) OpenAI-only account excluded" -Changes @{ kind = 'OpenAI' } -Expected $false
+    Invoke-RuleCase @common -Name "$($connectionCase.category) non-project AIServices excluded" -Changes @{ $projectManagementField = $false } -Expected $false
+    Invoke-RuleCase @common -Name "$($connectionCase.category) ML hub excluded" -Changes @{ type = 'Microsoft.MachineLearningServices/workspaces' } -Expected $false
+    Invoke-RuleCase @common -Name "$($connectionCase.category) project child is not an account" -Changes @{ type = "$coreType/projects" } -Expected $false
+    Invoke-RuleCase @common -Name "$($connectionCase.category) standalone disabled effect" -ParameterChanges @{ effect = 'Disabled' } -Expected $false
+    Confirm-Assertion ($definitions[$connectionCase.policy].policyRule.then.details.type -eq $connectionType) 'Related-resource lookup must stay beneath the evaluated account.'
+}
+
+$projectType = "$coreType/projects"
+$projectConnectionType = "$projectType/connections"
+$projectCategoryField = "$projectConnectionType/category"
+$projectTargetField = "$projectConnectionType/target"
+$projectInsights = @{ type = $projectConnectionType; $projectCategoryField = 'AppInsights'; $projectTargetField = '/subscriptions/example/providers/Microsoft.Insights/components/example' }
+$common = @{ PolicyName = 'require-foundry-app-insights-connection'; Fields = @{ type = $projectType } }
+Invoke-RuleCase @common -Name 'Project without App Insights connection' -Expected $true
+Invoke-RuleCase @common -Name 'Project with App Insights connection' -RelatedResources @($projectInsights) -Expected $false
+Invoke-RuleCase @common -Name 'Project connection with wrong category' -RelatedResources @(@{ type = $projectConnectionType; $projectCategoryField = 'AzureKeyVault'; $projectTargetField = 'https://example.invalid' }) -Expected $true
+Invoke-RuleCase @common -Name 'Project App Insights connection with empty target' -RelatedResources @(@{ type = $projectConnectionType; $projectCategoryField = 'AppInsights'; $projectTargetField = '' }) -Expected $true
+Invoke-RuleCase @common -Name 'Account-level App Insights connection does not satisfy the project check' -RelatedResources @(@{ type = "$coreType/connections"; "$coreType/connections/category" = 'AppInsights'; "$coreType/connections/target" = 'https://example.invalid' }) -Expected $true
+Invoke-RuleCase @common -Name 'Standalone App Insights component is not a connection' -RelatedResources @(@{ type = 'Microsoft.Insights/components' }) -Expected $true
+Invoke-RuleCase @common -Name 'Foundry accounts are not assessed by the project check' -Changes @{ type = $coreType; kind = 'AIServices'; $projectManagementField = $true } -Expected $false
+Invoke-RuleCase @common -Name 'ML projects are not assessed by the Foundry project check' -Changes @{ type = 'Microsoft.MachineLearningServices/workspaces' } -Expected $false
+Invoke-RuleCase @common -Name 'Project App Insights disabled effect' -ParameterChanges @{ effect = 'Disabled' } -Expected $false
+Confirm-Assertion ($definitions['require-foundry-app-insights-connection'].policyRule.then.details.type -eq $projectConnectionType) 'App Insights lookup must stay beneath the evaluated project.'
+
+$raiField = "$deploymentType/raiPolicyName"
+$common = @{ PolicyName = 'require-ai-deployment-content-filter'; Fields = @{ type = $deploymentType; $raiField = 'Microsoft.DefaultV2' } }
+Invoke-RuleCase @common -Name 'Default content filter compliant' -Expected $false
+Invoke-RuleCase @common -Name 'Named custom content filter compliant' -Changes @{ $raiField = 'contoso-strict' } -Expected $false
+Invoke-RuleCase @common -Name 'Missing content filter reported' -RemoveFields $raiField -Expected $true
+Invoke-RuleCase @common -Name 'Empty content filter reported' -Changes @{ $raiField = '' } -Expected $true
+Invoke-RuleCase @common -Name 'Microsoft.Nil content filter reported' -Changes @{ $raiField = 'Microsoft.Nil' } -Expected $true
+Invoke-RuleCase @common -Name 'Content filter Deny option' -Changes @{ $raiField = 'Microsoft.Nil' } -ParameterChanges @{ effect = 'Deny' } -Expected $true
+Invoke-RuleCase @common -Name 'Accounts are not assessed by the content filter check' -Changes @{ type = $coreType } -RemoveFields $raiField -Expected $false
+
+$endpointType = 'Microsoft.MachineLearningServices/workspaces/onlineEndpoints'
+$authField = "$endpointType/authMode"
+$common = @{ PolicyName = 'require-ml-endpoint-entra-auth'; Fields = @{ type = $endpointType; $authField = 'AADToken' } }
+Invoke-RuleCase @common -Name 'Entra ID endpoint auth compliant' -Expected $false
+Invoke-RuleCase @common -Name 'Key endpoint auth reported' -Changes @{ $authField = 'Key' } -Expected $true
+Invoke-RuleCase @common -Name 'Azure ML token endpoint auth reported' -Changes @{ $authField = 'AMLToken' } -Expected $true
+Invoke-RuleCase @common -Name 'Missing endpoint auth mode reported' -RemoveFields $authField -Expected $true
+Invoke-RuleCase @common -Name 'Endpoint auth Deny option' -Changes @{ $authField = 'Key' } -ParameterChanges @{ effect = 'Deny' } -Expected $true
+Invoke-RuleCase @common -Name 'Batch endpoints are not assessed by the online endpoint check' -Changes @{ type = 'Microsoft.MachineLearningServices/workspaces/batchEndpoints'; $authField = 'Key' } -Expected $false
+
+$computeType = 'Microsoft.MachineLearningServices/workspaces/computes'
+$common = @{ PolicyName = 'require-ai-system-assigned-identity'; Fields = @{ type = $coreType; kind = 'OpenAI'; 'identity.type' = 'SystemAssigned' } }
+Invoke-RuleCase @common -Name 'System-assigned identity compliant' -Expected $false
+Invoke-RuleCase @common -Name 'System plus user-assigned identity compliant' -Changes @{ 'identity.type' = 'SystemAssigned, UserAssigned' } -Expected $false
+Invoke-RuleCase @common -Name 'System plus user-assigned identity without space compliant' -Changes @{ 'identity.type' = 'SystemAssigned,UserAssigned' } -Expected $false
+Invoke-RuleCase @common -Name 'User-assigned only is reported' -Changes @{ 'identity.type' = 'UserAssigned' } -Expected $true
+Invoke-RuleCase @common -Name 'Identity None is reported' -Changes @{ 'identity.type' = 'None' } -Expected $true
+Invoke-RuleCase @common -Name 'Missing identity is reported' -RemoveFields 'identity.type' -Expected $true
+Invoke-RuleCase @common -Name 'System identity Deny option' -Changes @{ 'identity.type' = 'UserAssigned' } -ParameterChanges @{ effect = 'Deny' } -Expected $true
+foreach ($identityType in @("$coreType/projects", 'Microsoft.MachineLearningServices/workspaces', 'Microsoft.MachineLearningServices/registries', 'Microsoft.MachineLearningServices/workspaces/onlineEndpoints', 'Microsoft.MachineLearningServices/workspaces/batchEndpoints', 'Microsoft.Search/searchServices', 'Microsoft.HealthBot/healthBots', 'Microsoft.HealthDataAIServices/deidServices', 'Microsoft.VideoIndexer/accounts')) {
+    Invoke-RuleCase @common -Name "$identityType without system identity" -Changes @{ type = $identityType } -RemoveFields 'identity.type' -Expected $true
+    Invoke-RuleCase @common -Name "$identityType with system identity" -Changes @{ type = $identityType } -Expected $false
+}
+foreach ($computeKind in @('AmlCompute', 'ComputeInstance')) {
+    Invoke-RuleCase @common -Name "$computeKind without system identity" -Changes @{ type = $computeType; "$computeType/computeType" = $computeKind } -RemoveFields 'identity.type' -Expected $true
+}
+Invoke-RuleCase @common -Name 'Attached Kubernetes compute not assessed' -Changes @{ type = $computeType; "$computeType/computeType" = 'Kubernetes' } -RemoveFields 'identity.type' -Expected $false
+Invoke-RuleCase @common -Name 'Bot Service has no ARM identity and is not assessed' -Changes @{ type = 'Microsoft.BotService/botServices' } -RemoveFields 'identity.type' -Expected $false
+Invoke-RuleCase @common -Name 'Model deployments are not assessed' -Changes @{ type = $deploymentType } -RemoveFields 'identity.type' -Expected $false
+Invoke-RuleCase @common -Name 'Unrelated resources are not assessed' -Changes @{ type = $unrelatedType } -RemoveFields 'identity.type' -Expected $false
+
 $deploymentPath = Join-Path $PSScriptRoot 'Deploy-AiGovernance.ps1'
 $deploymentTokens = $null
 $deploymentErrors = $null
@@ -589,7 +728,7 @@ $deploymentAst = [System.Management.Automation.Language.Parser]::ParseFile($depl
 if ($deploymentErrors.Count -gt 0) {
     throw "Deployment script syntax errors: $(@($deploymentErrors | ForEach-Object { $_.Message }) -join '; ')"
 }
-foreach ($functionName in @('Get-AuditSelection', 'New-AuditReference', 'New-AuditInitiative', 'Get-PolicyFields')) {
+foreach ($functionName in @('Get-AuditSelection', 'Get-ExpectedBuiltIns', 'Get-FoundryBindings', 'New-AuditReference', 'New-AuditInitiative', 'Get-PolicyFields')) {
     $functionAst = $deploymentAst.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
@@ -601,65 +740,71 @@ $selection = @(Get-AuditSelection $manifest)
 Confirm-Assertion ($selection.Count -eq $baselineReferences.Count) 'Deployment selection differs from the audit-only manifest.'
 $fixtureBuiltIns = @{}
 foreach ($policy in $selection) {
-    $effectParameter = if ($policy.Contains('effectParameter')) { $policy.effectParameter } else { 'effect' }
+    $effectName = if ($policy.Contains('effectParameter') -and $policy.effectParameter) { $policy.effectParameter } else { 'effect' }
     $fixtureBuiltIns[$policy.reference] = @{
         displayName = $policy.displayName
-        policyRule = @{ then = @{ effect = "[parameters('$effectParameter')]" } }
+        policyRule = @{ then = @{ effect = "[parameters('$effectName')]" } }
         parameters = @{
-            $effectParameter = @{ type = 'String'; allowedValues = $policy.documentedEffects; defaultValue = 'Disabled' }
-            testRequiredValue = @{ type = 'String'; metadata = @{ displayName = 'Required test value'; assignPermissions = $true } }
+            $effectName = @{ type = 'String'; allowedValues = $policy.documentedEffects; defaultValue = 'Disabled' }
         }
     }
 }
-$fixtureBuiltIns.B43.parameters.effect = @{
-    type = 'String'
-    allowedValues = @('Audit', 'Deny', 'Disabled')
-    defaultValue = 'Audit'
-    metadata = @{ deprecated = $true }
-}
-$fixtureBuiltIns.B06.parameters.isolationMode = @{
-    type = 'String'
-    allowedValues = @('AllowInternetOutbound', 'AllowOnlyApprovedOutbound', 'Disabled')
-    defaultValue = 'Disabled'
-}
-foreach ($referenceId in @('B29', 'B30')) {
-    $fixtureBuiltIns[$referenceId].parameters.requiredRetentionDays = @{
-        type = 'String'
-        defaultValue = '365'
-    }
-}
-$fixtureBuiltIns.B42.parameters.excludedManagedByResourceProviders = @{
-    type = 'Array'
-    allowedValues = @('Azure Red Hat OpenShift', 'Azure Databricks', 'Microsoft Purview', 'All managed resource groups')
-    defaultValue = @()
-}
+$fixtureBuiltIns.B06.parameters.isolationMode = @{ type = 'String'; allowedValues = @('AllowInternetOutbound', 'AllowOnlyApprovedOutbound', 'Disabled'); defaultValue = 'Disabled' }
+$fixtureBuiltIns.B29.parameters.requiredRetentionDays = @{ type = 'String'; defaultValue = '365' }
+$fixtureBuiltIns.B30.parameters.requiredRetentionDays = @{ type = 'String'; defaultValue = '365' }
+$fixtureBuiltIns.B19.parameters.denyPreviewModels = @{ type = 'Boolean'; defaultValue = $false }
+$fixtureBuiltIns.B19.parameters.onlyAllowDirectFromAzure = @{ type = 'Boolean'; defaultValue = $false }
 $fixtureScope = '/providers/Microsoft.Management/managementGroups/00000000-0000-0000-0000-000000000000'
 $initiative = New-AuditInitiative -Scope $fixtureScope -Prefix 'test-ai' -Name 'Audit test' -CustomDefinitions $definitions -SelectedPolicies $selection -BuiltInDefinitions $fixtureBuiltIns
-$keyVaultReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B43' } | Select-Object -First 1
-Confirm-Assertion ($keyVaultReference.parameters.audit_effect.value -eq 'Audit') 'Key Vault active effect must be fixed to Audit.'
-Confirm-Assertion ($keyVaultReference.parameters.effect.value -eq 'Audit') 'Key Vault deprecated effect must be fixed to Audit.'
-Confirm-Assertion (-not $initiative.parameters.Contains('B43_effect')) 'Do not expose the deprecated Key Vault effect as an initiative parameter.'
-$coreBuiltInReferences = @('B01', 'B04', 'B06', 'B07', 'B09', 'B10', 'B11', 'B28', 'B29', 'B30', 'B36') + @(38..57 | ForEach-Object { "B$_" })
-Confirm-Assertion (@(Compare-Object $coreBuiltInReferences @($selection.reference)).Count -eq 0) 'Only the agreed core security built-ins may enter the baseline.'
-Confirm-Assertion ($initiative.policyDefinitions.Count -eq 13 + $selection.Count) 'Unexpected number of core initiative references.'
-Confirm-Assertion (@($initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -match '^AI_(AccountKinds|DeploymentSkus|VirtualNetworkRules)$|^B(05|12|13|14|16|17|18|19|20|22|23|24|25|26|27|31|32|33|34|35)(_|$)' }).Count -eq 0) 'Optional, model, publisher, service-kind, and SKU controls must not remain in the initiative.'
-Confirm-Assertion (@($initiative.parameters.Keys | Where-Object { $_ -in @('allowedKinds', 'allowedDeploymentSkus', 'allowedSubnetIds') -or $_ -match '^B(18|19|20|22|23|24|25|26|27|31)_' }).Count -eq 0) 'Fresh core initiatives must not expose model, publisher, service-kind, SKU, filter, or destination inputs.'
-$networkReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B06' } | Select-Object -First 1
-Confirm-Assertion ($networkReference.parameters.isolationMode.value -eq 'AllowOnlyApprovedOutbound') 'The ML network baseline must not inherit the misleading Disabled mode default.'
-foreach ($referenceId in @('B29', 'B30')) {
-    $loggingReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $referenceId } | Select-Object -First 1
-    Confirm-Assertion ($loggingReference.parameters.requiredRetentionDays.value -eq '0') 'Basic logging checks must not impose an organization-wide storage retention period.'
+Confirm-Assertion ($initiative.metadata.baseline -eq 'AIPlatformAudit' -and $initiative.metadata.version -eq '5.4.0') 'Incorrect profile version.'
+Confirm-Assertion ($initiative.description.Length -le 512 -and $initiative.displayName.Length -le 128) 'Azure limits initiative descriptions to 512 and display names to 128 characters.'
+Confirm-Assertion ($initiative.metadata.accountScope -eq 'FoundryAccountsOnly' -and -not $initiative.metadata.Contains('modelDeploymentScope')) 'Scope boundaries must be explicit.'
+Confirm-Assertion ($initiative.metadata.integrationScope -eq 'KeyVaultOnAccountAppInsightsOnProject') 'The Key Vault account and App Insights project contract must be explicit.'
+Confirm-Assertion (@(Compare-Object (Get-ExpectedBuiltIns) @($baselineReferences.reference)).Count -eq 0) 'Manifest selection must match Get-ExpectedBuiltIns.'
+$expectedReferences = @(Get-FoundryBindings | ForEach-Object { $_.reference }) + @(Get-ExpectedBuiltIns)
+Confirm-Assertion ($initiative.policyDefinitions.Count -eq 34 -and @(Compare-Object $expectedReferences @($initiative.policyDefinitions.policyDefinitionReferenceId)).Count -eq 0) 'The initiative must contain the eight custom checks and 26 built-ins.'
+Confirm-Assertion (@($initiative.policyDefinitions.policyDefinitionId | Sort-Object -Unique).Count -eq 34) 'Each check must have its own definition.'
+Confirm-Assertion (@('B02', 'B03', 'B09' | Where-Object { $_ -in $expectedReferences }).Count -eq 0) 'Duplicate Search local-auth and public-disable checks must stay out.'
+$mlNetwork = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B06' } | Select-Object -First 1
+Confirm-Assertion ($mlNetwork.parameters.isolationMode.value -eq 'AllowOnlyApprovedOutbound') 'ML managed network must be fixed to approved-outbound, not the Disabled default.'
+$mlLogs = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B29' } | Select-Object -First 1
+Confirm-Assertion ($mlLogs.parameters.requiredRetentionDays.value -eq '0') 'ML log check must not impose a retention period.'
+$searchLogs = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B30' } | Select-Object -First 1
+Confirm-Assertion ($searchLogs.parameters.requiredRetentionDays.value -eq '0') 'Search log check must not impose a retention period.'
+$eligibility = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B19' } | Select-Object -First 1
+Confirm-Assertion ($eligibility.parameters.denyPreviewModels.value -eq $true -and $eligibility.parameters.onlyAllowDirectFromAzure.value -eq $false) 'Model eligibility must report preview models only.'
+Confirm-Assertion (@(Get-FoundryBindings).Count -eq 8) 'Only eight custom definitions should be published.'
+Confirm-Assertion ($initiative.parameters.Count -eq 34 -and @($initiative.parameters.Keys | Where-Object { $_ -notlike '*_effect' }).Count -eq 0) 'Fresh initiatives must expose exactly one effect override per policy and no other parameters.'
+foreach ($reference in $initiative.policyDefinitions) {
+    $overrideName = "$($reference.policyDefinitionReferenceId)_effect"
+    $override = $initiative.parameters[$overrideName]
+    $boundEffect = @($reference.parameters.GetEnumerator() | Where-Object { $_.Key -in 'effect', 'effects', 'audit_effect' })
+    Confirm-Assertion ($null -ne $override -and $override.Contains('defaultValue') -and $override.type -eq 'String') "Effect override must be optional: $overrideName"
+    Confirm-Assertion ($boundEffect.Count -eq 1 -and $boundEffect[0].Value.value -eq "[parameters('$overrideName')]") "Policy effect must bind to its override: $($reference.policyDefinitionReferenceId)"
+    Confirm-Assertion ($override.defaultValue -in @('Audit', 'AuditIfNotExists') -and $override.defaultValue -in $override.allowedValues) "Effect override must default to an audit effect: $overrideName"
 }
-$storageReference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq 'B42' } | Select-Object -First 1
-Confirm-Assertion (@($storageReference.parameters.excludedManagedByResourceProviders.value).Count -eq 0) 'Core private-endpoint coverage must not silently exempt managed-service storage.'
-foreach ($parameterName in @('B06_isolationMode', 'B29_requiredRetentionDays', 'B30_requiredRetentionDays', 'B42_excludedManagedByResourceProviders')) {
-    Confirm-Assertion (-not $initiative.parameters.Contains($parameterName)) "Fixed baseline setting must not require operator configuration: $parameterName"
+foreach ($policy in $selection) {
+    $effectName = if ($policy.Contains('effectParameter') -and $policy.effectParameter) { $policy.effectParameter } else { 'effect' }
+    Confirm-Assertion (@(Compare-Object @($fixtureBuiltIns[$policy.reference].parameters[$effectName].allowedValues) @($initiative.parameters["$($policy.reference)_effect"].allowedValues)).Count -eq 0) "Effect override must offer every effect the policy supports: $($policy.reference)"
 }
-foreach ($referenceId in @('B18', 'B19', 'B20', 'B26', 'B27')) {
-    Confirm-Assertion ($manifest.assignmentProfile.excludedReferences.Contains($referenceId)) "Workload-specific model and agent controls must remain excluded: $referenceId"
+Confirm-Assertion ('B18' -notin $expectedReferences -and $manifest.assignmentProfile.excludedReferences.Contains('B18')) 'The allowed-models check needs parameter lists and must stay excluded.'
+foreach ($binding in Get-FoundryBindings) {
+    $reference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $binding.reference } | Select-Object -First 1
+    Confirm-Assertion ($reference.parameters.Count -eq 1 -and $reference.parameters.effect.value -eq "[parameters('$($binding.reference)_effect')]" -and
+        $initiative.parameters["$($binding.reference)_effect"].defaultValue -eq $binding.effect -and
+        @(Compare-Object @($definitions[$binding.file].parameters.effect.allowedValues) @($initiative.parameters["$($binding.reference)_effect"].allowedValues)).Count -eq 0) "Custom Foundry effect override is wrong: $($binding.reference)"
 }
+$boundEffects = @($initiative.parameters.Values | ForEach-Object { $_.defaultValue })
+Confirm-Assertion ((Get-FoundryBindings | Where-Object reference -eq 'B32') -eq $null -and ($initiative.policyDefinitions | Where-Object policyDefinitionReferenceId -eq 'B32').parameters.effects.value -eq "[parameters('B32_effect')]") 'B32 must bind its real effects parameter to its override.'
+Confirm-Assertion (@($boundEffects | Where-Object { $_ -eq 'Audit' }).Count -eq 28) 'Expected 28 Audit effects.'
+Confirm-Assertion (@($boundEffects | Where-Object { $_ -eq 'AuditIfNotExists' }).Count -eq 6) 'Expected six AuditIfNotExists effects.'
 Confirm-Assertion ($definitions.ContainsKey('restrict-ai-virtual-network-rules')) 'Removing the subnet check from the initiative must not delete its standalone definition.'
 $retiredParameters = @{
+    allowedLocations = @{ type = 'Array'; metadata = @{ displayName = 'Approved locations' } }
+    allowedIpRules = @{ type = 'Array'; metadata = @{ displayName = 'Approved public IP rules' } }
+    locationResourceTypes = @{ type = 'Array'; defaultValue = @('Microsoft.Storage/storageAccounts') }
+    tagResourceTypes = @{ type = 'Array'; defaultValue = @('Microsoft.CognitiveServices/accounts') }
+    allowTrustedServices = @{ type = 'Boolean'; defaultValue = $false }
     allowedKinds = @{ type = 'Array'; metadata = @{ displayName = 'Approved service kinds' } }
     allowedDeploymentSkus = @{ type = 'Array'; metadata = @{ displayName = 'Approved deployment SKUs' } }
     allowedSubnetIds = @{ type = 'Array'; metadata = @{ displayName = 'Approved subnets'; assignPermissions = $true } }
@@ -719,37 +864,15 @@ foreach ($reference in $initiative.policyDefinitions | Where-Object { $_.policyD
 }
 Confirm-Assertion ($deploymentAst.Extent.Text -notmatch 'policyAssignments|New-AzPolicyAssignment|AssignmentParametersFile') 'Deployment script must not create assignments.'
 $initiativeTags = @($initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -like 'Tag_*' })
-Confirm-Assertion ($initiativeTags.Count -eq 7) 'Initiative must reference exactly the seven user-selected AI tags.'
-foreach ($reference in $initiativeTags) {
-    $tagName = $reference.parameters.tagName.value
-    Confirm-Assertion ($reference.parameters.effect.value -eq 'Audit') "Non-audit tag reference: $tagName"
-    Confirm-Assertion ($reference.parameters.resourceTypes.value -eq "[parameters('tagResourceTypes')]") "Tag resource scope not shared: $tagName"
-    if ($tagName -eq 'ai-workload') {
-        Confirm-Assertion (-not $reference.parameters.Contains('allowedTagValues')) 'Workload identifiers must remain free-form.'
-    }
-    else {
-        Confirm-Assertion ($tagValues.Contains($tagName)) "Unexpected initiative tag: $tagName"
-        Confirm-Assertion (@(Compare-Object @($tagValues[$tagName]) @($reference.parameters.allowedTagValues.value)).Count -eq 0) "Wrong vocabulary for $tagName"
-    }
-}
+Confirm-Assertion ($initiativeTags.Count -eq 0) 'Tags are not among the six requested policies.'
 foreach ($reference in $initiative.policyDefinitions) {
     foreach ($binding in $reference.parameters.GetEnumerator()) {
         if ($binding.Key -in @('effect', 'effects')) {
-            Confirm-Assertion ($binding.Value.value -in @('Audit', 'AuditIfNotExists')) "Mutable or non-audit initiative effect: $($reference.policyDefinitionReferenceId)"
+            Confirm-Assertion ($binding.Value.value -eq "[parameters('$($reference.policyDefinitionReferenceId)_effect')]") "Effect must be overridable at assignment: $($reference.policyDefinitionReferenceId)"
         }
     }
 }
-foreach ($parameterName in @('allowedLocations', 'allowedIpRules')) {
-    Confirm-Assertion ($initiative.parameters.Contains($parameterName)) "Missing customer parameter: $parameterName"
-    Confirm-Assertion (-not $initiative.parameters[$parameterName].Contains('defaultValue')) "Customer allowlist must not be invented: $parameterName"
-}
-foreach ($policy in $selection) {
-    $parameterName = "$($policy.reference)_testRequiredValue"
-    Confirm-Assertion ($initiative.parameters.Contains($parameterName)) "Built-in parameter not lifted: $parameterName"
-    Confirm-Assertion (-not $initiative.parameters[$parameterName].metadata.Contains('assignPermissions')) 'Audit assignment must not request automatic role assignment.'
-    Confirm-Assertion ($initiative.parameters[$parameterName].metadata.displayName -like "*($($policy.reference))") "Built-in parameter label must identify its policy: $parameterName"
-}
-$builtInParameterLabels = @($initiative.parameters.GetEnumerator() | Where-Object { $_.Key -match '^B\d+_' } | ForEach-Object { $_.Value.metadata.displayName })
+$builtInParameterLabels = @($initiative.parameters.Values | ForEach-Object { $_.metadata.displayName })
 Confirm-Assertion (@($builtInParameterLabels | Sort-Object -Unique).Count -eq $builtInParameterLabels.Count) 'Built-in parameter labels must be distinguishable in the assignment form.'
 Confirm-Assertion ($definitions.ContainsKey('allowed-ai-account-kinds') -and $definitions.ContainsKey('allowed-model-deployment-skus')) 'Removing allowlists from the baseline must not delete standalone policy files.'
 Confirm-Assertion ($manifest.assignmentProfile.excludedReferences.Contains('B37')) 'The ineligible System Policy built-in must remain excluded.'
@@ -777,12 +900,11 @@ $networkAliases = @(@('restrict-ai-public-ip-access', 'restrict-ai-virtual-netwo
 Confirm-Assertion ('Microsoft.Search/searchServices/networkRuleSet.ipRules[*].value' -in $networkAliases) 'Nested field-count alias not discovered.'
 Confirm-Assertion ('Microsoft.CognitiveServices/accounts/networkAcls.virtualNetworkRules[*].id' -in $networkAliases) 'Subnet alias not discovered.'
 Confirm-Assertion (-not $definitions.ContainsKey('restrict-ai-public-network-access')) 'The combined public-access policy must not be republished alongside its replacements.'
-foreach ($referenceId in @('AI_PublicIPs', 'AI_TrustedServices', 'AI_PrivateEndpoints', 'AI_MonitorPrivateLinkScope', 'AI_FoundryVnetInjection')) {
-    $reference = $initiative.policyDefinitions | Where-Object { $_.policyDefinitionReferenceId -eq $referenceId } | Select-Object -First 1
-    Confirm-Assertion ($null -ne $reference -and $reference.parameters.effect.value -eq 'Audit') "Missing audit-only network reference: $referenceId"
+foreach ($binding in Get-FoundryBindings | Where-Object { $_.file -like 'require-foundry-*' -and $_.file -ne 'require-foundry-app-insights-connection' }) {
+    $aliases = @(Get-PolicyFields $definitions[$binding.file].policyRule)
+    Confirm-Assertion ('Microsoft.CognitiveServices/accounts/allowProjectManagement' -in $aliases) "Missing Foundry scope guard: $($binding.file)"
 }
-Confirm-Assertion ($initiative.parameters.allowTrustedServices.defaultValue -eq $false) 'Trusted-service bypass must remain unapproved by default.'
 
-Write-Output "PASS: $($rows.Count) controls, $($manifest.policies.Count) built-in references ($($baselineReferences.Count) audit-baseline candidates), $($definitions.Count) Audit/Deny custom definitions defaulting to Audit, and $script:ruleCaseCount rule cases."
-Write-Output 'PASS: deployment script syntax, initiative generation, seven tag mappings, customer parameters, and fixed audit effects.'
-Write-Output 'Local checks only: fixture aliases are flattened inputs, not provider evaluation. Azure deployment, alias availability, API defaults, and live network behavior are not validated.'
+Write-Output "PASS: $($rows.Count) catalogue controls, $($manifest.policies.Count) documented built-ins, $($definitions.Count) retained custom definitions, and $script:ruleCaseCount rule cases."
+Write-Output 'PASS: exactly 34 references (8 custom + 26 built-ins for Foundry, Azure ML, model deployments, and other AI services; defaults 28 Audit, 6 AuditIfNotExists), one optional effect override per policy and no other parameters, fixed hidden settings, compatible parameter retirement, and no assignments.'
+Write-Output 'Local checks only: flattened field and already-scoped related-resource fixtures are not the Azure Policy engine. Live compliance, child enumeration, connection usability, and network behavior require validation after manual assignment.'

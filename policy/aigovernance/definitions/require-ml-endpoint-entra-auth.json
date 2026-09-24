@@ -1,0 +1,38 @@
+{
+  "displayName": "Azure Machine Learning online endpoints should use Microsoft Entra ID authentication",
+  "description": "Audit Azure Machine Learning managed online endpoints whose authMode is not AADToken. Key-based and Azure ML token (AMLToken) endpoints are reported. Does not check who holds data-plane roles, or serverless and batch endpoints. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-118"],
+    "source": "https://learn.microsoft.com/azure/machine-learning/how-to-authenticate-online-endpoint",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "No live built-in among 2862 definitions checks the authentication mode of Azure Machine Learning online endpoints. B10 covers compute local authentication only."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports online endpoints that do not use Microsoft Entra ID tokens. Deny is available only for a separate explicit assignment."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces/onlineEndpoints" },
+        { "field": "Microsoft.MachineLearningServices/workspaces/onlineEndpoints/authMode", "notEquals": "AADToken" }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

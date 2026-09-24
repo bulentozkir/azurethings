@@ -1,0 +1,55 @@
+{
+  "displayName": "Foundry accounts should enable trusted-service network access",
+  "description": "Audit project-enabled AIServices accounts unless networkAcls.bypass is AzureServices and public access is disabled or uses a default-deny firewall. Preserves selected-network access without an IP allowlist parameter. Does not validate individual IP/subnet approvals, actual connectivity, or change firewall settings. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-110"],
+    "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts#networkruleset",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "No Cognitive Services built-in inspecting networkAcls.bypass was found among 2862 live built-ins. Network restriction and public-network-disable built-ins do not require the trusted-service exception."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports the missing trusted-service exception. Deny is available only for a separate explicit assignment."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+        { "field": "kind", "equals": "AIServices" },
+        { "field": "Microsoft.CognitiveServices/accounts/allowProjectManagement", "equals": true },
+        {
+          "anyOf": [
+            { "field": "Microsoft.CognitiveServices/accounts/networkAcls.bypass", "notEquals": "AzureServices" },
+            {
+              "not": {
+                "anyOf": [
+                  { "field": "Microsoft.CognitiveServices/accounts/publicNetworkAccess", "equals": "Disabled" },
+                  {
+                    "allOf": [
+                      { "field": "Microsoft.CognitiveServices/accounts/publicNetworkAccess", "equals": "Enabled" },
+                      { "field": "Microsoft.CognitiveServices/accounts/networkAcls.defaultAction", "equals": "Deny" }
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "displayName": "AI resources should have a system-assigned managed identity enabled",
+  "description": "Audit AI resources whose identity.type does not include SystemAssigned: Cognitive Services accounts (all kinds, including Foundry and Azure OpenAI), Foundry projects, Azure ML workspaces, registries, online and batch endpoints, AmlCompute and compute instances, Azure AI Search, Health Bot, de-identification services, and Video Indexer. User-assigned-only resources are reported. Bot Service has no ARM managed identity and is not assessed. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-116"],
+    "source": "https://learn.microsoft.com/azure/governance/policy/concepts/definition-structure-policy-rule#fields",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "Among 2862 live built-ins, only fe3fd216 (B11, Cognitive Services only) checks identity.type, and it accepts user-assigned-only identities. 5f0c7d88 (B12) requires user-assigned identity on ML workspaces. No built-in requires a system-assigned identity."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports AI resources without a system-assigned managed identity. Deny is available only for a separate explicit assignment."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "field": "type",
+              "in": [
+                "Microsoft.CognitiveServices/accounts",
+                "Microsoft.CognitiveServices/accounts/projects",
+                "Microsoft.MachineLearningServices/workspaces",
+                "Microsoft.MachineLearningServices/registries",
+                "Microsoft.MachineLearningServices/workspaces/onlineEndpoints",
+                "Microsoft.MachineLearningServices/workspaces/batchEndpoints",
+                "Microsoft.Search/searchServices",
+                "Microsoft.HealthBot/healthBots",
+                "Microsoft.HealthDataAIServices/deidServices",
+                "Microsoft.VideoIndexer/accounts"
+              ]
+            },
+            {
+              "allOf": [
+                { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces/computes" },
+                { "field": "Microsoft.MachineLearningServices/workspaces/computes/computeType", "in": ["AmlCompute", "ComputeInstance"] }
+              ]
+            }
+          ]
+        },
+        {
+          "anyOf": [
+            { "field": "identity.type", "exists": "false" },
+            { "field": "identity.type", "notContains": "SystemAssigned" }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

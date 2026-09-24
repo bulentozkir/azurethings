@@ -1,0 +1,46 @@
+{
+  "displayName": "Foundry projects should have an Application Insights connection",
+  "description": "Audit Foundry projects without a project-level AppInsights connection with a nonempty target. Foundry connects Application Insights per project for tracing. An account-level connection, diagnostic setting, or unrelated Application Insights resource does not satisfy this check. Does not verify target existence, telemetry delivery, or instrumentation.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "2.0.0",
+    "controlIds": ["AI-GOV-112"],
+    "source": "https://learn.microsoft.com/azure/ai-foundry/how-to/develop/trace-agents-sdk",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "No Foundry connection-presence audit was found among 2862 live built-ins. Diagnostic-settings and private-link policies do not establish AppInsights integration. The project connection category and target aliases were verified in the live Cognitive Services provider."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "AuditIfNotExists reports a missing related connection without changing the project. Deny cannot implement this related-resource existence check."
+      },
+      "allowedValues": ["AuditIfNotExists", "Disabled"],
+      "defaultValue": "AuditIfNotExists"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "field": "type",
+      "equals": "Microsoft.CognitiveServices/accounts/projects"
+    },
+    "then": {
+      "effect": "[parameters('effect')]",
+      "details": {
+        "type": "Microsoft.CognitiveServices/accounts/projects/connections",
+        "existenceCondition": {
+          "allOf": [
+            { "field": "Microsoft.CognitiveServices/accounts/projects/connections/category", "equals": "AppInsights" },
+            { "field": "Microsoft.CognitiveServices/accounts/projects/connections/target", "exists": "true" },
+            { "field": "Microsoft.CognitiveServices/accounts/projects/connections/target", "notEquals": "" }
+          ]
+        }
+      }
+    }
+  }
+}

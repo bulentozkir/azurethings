@@ -1,0 +1,44 @@
+{
+  "displayName": "AI model deployments should have a content filter assigned",
+  "description": "Audit Cognitive Services model deployments (Foundry, Azure OpenAI) whose raiPolicyName is missing, empty, or Microsoft.Nil. The default or any named custom content filter passes. Does not inspect the settings inside a custom filter, so a custom filter with relaxed or disabled categories is not detected. Models that do not support content filtering, such as audio models, may need an exemption. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-117"],
+    "source": "https://learn.microsoft.com/azure/ai-foundry/openai/how-to/content-filters",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "No live GA built-in among 2862 definitions checks that a deployment has any content filter assigned. The preview content-filter built-ins (B22-B25) need filter-name and severity parameters."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports model deployments without a content filter. Deny is available only for a separate explicit assignment."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts/deployments" },
+        {
+          "anyOf": [
+            { "field": "Microsoft.CognitiveServices/accounts/deployments/raiPolicyName", "exists": "false" },
+            { "field": "Microsoft.CognitiveServices/accounts/deployments/raiPolicyName", "equals": "" },
+            { "field": "Microsoft.CognitiveServices/accounts/deployments/raiPolicyName", "equals": "Microsoft.Nil" }
+          ]
+        }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]"
+    }
+  }
+}

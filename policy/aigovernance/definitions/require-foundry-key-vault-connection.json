@@ -1,0 +1,49 @@
+{
+  "displayName": "Foundry accounts should have a Key Vault connection",
+  "description": "Audit project-enabled AIServices accounts without an account-level AzureKeyVault connection with a nonempty target. A project-only connection or an unrelated vault in the same resource group does not satisfy this account-level check. Does not require customer-managed encryption or verify secret access, RBAC, target existence, or runtime use.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-111"],
+    "source": "https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts/connections",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "No Foundry connection-presence audit was found among 2862 live built-ins. CMK policies check encryption, not a Key Vault secrets connection. The category and target aliases were verified in the live Cognitive Services provider."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "AuditIfNotExists reports a missing related connection without changing the account. Deny cannot implement this related-resource existence check."
+      },
+      "allowedValues": ["AuditIfNotExists", "Disabled"],
+      "defaultValue": "AuditIfNotExists"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+        { "field": "kind", "equals": "AIServices" },
+        { "field": "Microsoft.CognitiveServices/accounts/allowProjectManagement", "equals": true }
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]",
+      "details": {
+        "type": "Microsoft.CognitiveServices/accounts/connections",
+        "existenceCondition": {
+          "allOf": [
+            { "field": "Microsoft.CognitiveServices/accounts/connections/category", "equals": "AzureKeyVault" },
+            { "field": "Microsoft.CognitiveServices/accounts/connections/target", "exists": "true" },
+            { "field": "Microsoft.CognitiveServices/accounts/connections/target", "notEquals": "" }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,159 @@
-# Azure AI Governance: Core Security Baseline
+# Microsoft Foundry and Azure ML: Audit Controls
+
+The current profile is **AIPlatformAudit 5.4.0**, displayed as **Microsoft Foundry, Azure ML and AI Services - Audit Controls**: **34 distinct policies**. That is five Foundry custom checks, three other custom checks (system-assigned identity, model deployment content filter, ML endpoint Entra auth), and 26 simple built-ins (nine Azure ML, 17 for other AI services and model deployments). By default 28 use `Audit` and six use `AuditIfNotExists`; each policy's effect can be overridden at assignment (see [Assignment Inputs](#assignment-inputs)). Policies that need list inputs are excluded. No tags, region/IP allowlists, supporting-service controls, or remediation are included. The previous broad baseline and catalogue below are historical reference material.
+
+## Current Checks
+
+| # | Requirement | Implementation |
+| --- | --- | --- |
+| 1 | Trusted-resource access enabled | [Trusted services](definitions/require-foundry-trusted-services.json): requires `networkAcls.bypass=AzureServices` and either disabled public access or a default-deny public firewall. Individual IP/subnet rules are not allowlisted; no networking settings are changed. |
+| 2 | Has a private endpoint | [Foundry private endpoint](definitions/require-foundry-private-endpoint.json): at least one Approved private endpoint connection. Replaces built-in B04, which also assesses Azure AI Search and every Cognitive Services kind. |
+| 3 | VNet injection enabled | [Foundry injection](definitions/require-foundry-vnet-injection.json): the same agent injection entry needs a customer subnet and must not select a Microsoft-managed network. |
+| 4 | Deployed models allowed | **Removed in 5.1.0.** Built-in B18 needs approved publisher and model asset lists at assignment, so it was dropped to keep the initiative parameter-free. |
+| 5 | Key Vault integrated | [Key Vault connection](definitions/require-foundry-key-vault-connection.json): an account-level connection categorized `AzureKeyVault`, with a nonempty target. This is secrets integration, not a CMK requirement. |
+| 6 | Application Insights integrated | [Application Insights connection](definitions/require-foundry-app-insights-connection.json): each Foundry **project** needs a project-level connection categorized `AppInsights`, with a nonempty target. Foundry connects Application Insights per project for tracing. Account-level connections and diagnostic settings do not satisfy it. |
+
+Checks 1, 2, 3, and 5 target only `Microsoft.CognitiveServices/accounts` with `kind=AIServices` and `allowProjectManagement=true`; OpenAI-only accounts, other Cognitive Services kinds, Azure AI Search, and ML hubs are not assessed. Check 6 targets `Microsoft.CognitiveServices/accounts/projects`, which only exist under Foundry accounts. Integration checks inspect connections beneath the evaluated account or project, not unrelated resources in its resource group. Presence does not prove target existence, RBAC, secret access, telemetry delivery, or runtime use. Private endpoint presence does not prove DNS or traffic reachability.
+
+**Assignment boundary:** the initiative can be assigned at any scope; the five Foundry checks ignore non-Foundry resources. Every assignment input is optional. No assignment is created by the script.
+
+## System-Assigned Managed Identity Check
+
+[System-assigned identity](definitions/require-ai-system-assigned-identity.json) (`AI_SystemAssignedIdentity`, Audit by default) reports any AI resource whose `identity.type` does not include `SystemAssigned`. That covers user-assigned-only, `None`, and missing identities. No built-in requires a system-assigned identity: B11 accepts user-assigned identities and covers only Cognitive Services.
+
+| Assessed | Not assessed |
+| --- | --- |
+| Cognitive Services accounts of every kind (Foundry, Azure OpenAI, Speech, Vision, Language, and so on); Foundry projects; Azure ML workspaces (including hubs and projects), registries, online and batch endpoints, AmlCompute clusters, and compute instances; Azure AI Search; Health Bot; de-identification services; Video Indexer | Bot Service (it has no ARM managed identity, only `msaAppType` UserAssignedMSI); attached ML compute (Kubernetes, VMs, Databricks, and similar); model deployments and connections, which have no identity |
+
+A resource can use both identities, and B12 (user-assigned identity on ML workspaces) can pass on the same workspace. Having an identity does not prove it has any role assignments or that the service uses it.
+
+## Model Deployment Checks
+
+| Ref | Check | Effect | Note |
+| --- | --- | --- | --- |
+| B19 | Foundry model deployments should meet eligibility requirements (built-in) | Audit | `denyPreviewModels` fixed to `true` and `onlyAllowDirectFromAzure` fixed to `false`, so only deployments of **preview** models are reported. Applies to every Cognitive Services model deployment, including Azure OpenAI accounts. |
+| AI_DeploymentContentFilter | [Content filter assigned](definitions/require-ai-deployment-content-filter.json) (custom) | Audit | Reports deployments whose `raiPolicyName` is missing, empty, or `Microsoft.Nil`. The default or any named custom filter passes; settings inside a custom filter are not inspected. Models that do not support content filtering, such as audio models, may need an exemption. |
+
+## Azure ML Checks
+
+Simple built-ins only: no assignment inputs, audit effects, not preview or deprecated. They apply to every `Microsoft.MachineLearningServices` workspace or compute in scope, including hub-based Foundry (Hub/Project workspace kinds).
+
+| Ref | Built-in | Effect | Note |
+| --- | --- | --- | --- |
+| B36 | Azure Machine Learning workspaces should use private link | Audit | Approved private endpoint on the workspace. |
+| B06 | Azure Machine Learning and AI Studio should use Allow Only Approved Outbound Managed Vnet mode | Audit | `isolationMode` fixed to `AllowOnlyApprovedOutbound`; the built-in default of `Disabled` would audit the wrong posture. |
+| B29 | Resource logs in Azure Machine Learning Workspaces should be enabled | AuditIfNotExists | `requiredRetentionDays` fixed to `"0"`, so logging is checked without imposing a retention period. |
+| B10 | Azure Machine Learning Computes should have local authentication methods disabled | Audit | Compute resources, not online endpoints. |
+| B07 | Azure Machine Learning Computes should be in a virtual network | Audit | Review how managed-network compute is reported before treating findings as gaps. |
+| B16 | Azure Machine Learning workspaces should be encrypted with a customer-managed key | Audit | Flags hub/default workspaces without CMK encryption; Foundry `project` workspaces are skipped by the built-in. |
+| B12 | Azure Machine Learning workspaces should use user-assigned managed identity | Audit | Flags workspaces without a primary user-assigned identity. |
+| B32 | Azure Machine Learning compute instances should be recreated to get the latest software updates | Audit | Compute instances not on the latest OS image. Its effect parameter is named `effects`. |
+| B35 | Azure Machine Learning Compute Instance should have idle shutdown | Audit | Compute instances without an idle-shutdown setting. |
+| ML_EndpointEntraAuth | [Online endpoints use Entra ID auth](definitions/require-ml-endpoint-entra-auth.json) (custom) | Audit | Reports managed online endpoints whose `authMode` is not `AADToken`; key and Azure ML token (`AMLToken`) endpoints are flagged. Batch and serverless endpoints are not assessed. |
+
+Three simple ML built-ins remain excluded: disabling public network access (conflicts with the selected-network requirement), V1LegacyMode (flags every workspace not using legacy v1 mode), and a second CMK check (`7f40cee6`, same `encryption.status` test as B16).
+
+## Other AI Services Checks
+
+Simple built-ins (effect-only, audit, not preview or deprecated) for Cognitive Services accounts (Azure OpenAI, Speech, Vision, Language, Translator, Document Intelligence, Content Safety, and Foundry), Azure AI Search, Bot Service, Health Bot, and de-identification. Cognitive Services checks also evaluate Foundry accounts.
+
+| Ref | Built-in | Effect | Scope |
+| --- | --- | --- | --- |
+| B01 | Azure AI Services resources should have key access disabled (disable local authentication) | Audit | Cognitive Services, Search |
+| B04 | Azure AI Services resources should use Azure Private Link | Audit | Cognitive Services, Search. Overlaps the Foundry private-endpoint check on Foundry accounts. |
+| B05 | Azure AI Services resources should restrict network access | Audit | Cognitive Services, Search. Default-deny or IP rules; selected-network access passes. |
+| B11 | Cognitive Services accounts should use a managed identity | Audit | Cognitive Services |
+| B28 | Diagnostic logs in Azure AI services resources should be enabled | AuditIfNotExists | Cognitive Services, Search |
+| B17 | Cognitive Services accounts should use customer owned storage | Audit | Cognitive Services kinds that support it |
+| B14 | Azure AI Search services should use customer-managed keys to encrypt data at rest | AuditIfNotExists | Search |
+| B30 | Resource logs in Search services should be enabled | AuditIfNotExists | Search. `requiredRetentionDays` fixed to `"0"`, like B29. |
+| B33 | Azure AI Search service should use a SKU that supports private link | Audit | Search |
+| B39 | BotService resources should use private link | Audit | Bot Service |
+| B70 | Bot Service should have local authentication methods disabled | Audit | Bot Service |
+| B71 | Bot Service endpoint should be a valid HTTPS URI | Audit | Bot Service |
+| B72 | Bot Service should be encrypted with a customer-managed key | Audit | Bot Service |
+| B73 | Azure Health Bots should use customer-managed keys to encrypt data at rest | Audit | Health Bot |
+| B74 | Azure Health Bots should use Azure RBAC as their access control method | Audit | Health Bot |
+| B38 | Azure Health Data Services de-identification service should use private link | Audit | De-identification |
+
+Excluded: public-network-disable checks for Search (B02), Bot Service (public access and isolated mode), and de-identification, because selected-network access is allowed; and Search local auth (B09), because B01 already covers Search.
+
+## Assignment Inputs
+
+The only inputs are **34 optional effect overrides**, one per policy, named `<reference>_effect` and labelled `Effect: <policy name> (<reference>)`. Each defaults to its audit effect and offers every effect the underlying policy supports:
+
+| Choices | Policies |
+| --- | --- |
+| Audit, Deny, Disabled | B01, B05, B06, B10, B11, B12, B16, B17, B19, B33, B35, B70, B71, B72 |
+| Audit, Deny | Foundry_TrustedServices, Foundry_PrivateEndpoint, AI_FoundryVnetInjection, AI_SystemAssignedIdentity, AI_DeploymentContentFilter, ML_EndpointEntraAuth |
+| Audit, Disabled | B04, B07, B32, B36, B38, B39, B73, B74 |
+| AuditIfNotExists, Disabled | Foundry_KeyVault, Foundry_AppInsights, B14, B28, B29, B30 |
+
+Leaving every field unchanged gives an audit-only assignment. Choosing `Deny` blocks non-compliant creates and updates; test it on a narrow scope first. Other settings (B06 `isolationMode`, B19 `denyPreviewModels`/`onlyAllowDirectFromAzure`, B29/B30 `requiredRetentionDays`) stay fixed and hidden. B18 (model approval) was removed in 5.1.0 because it needs list inputs, and the generator rejects any initiative parameter that is not an effect override.
+
+## Publish And Validate
+
+Use PowerShell 7 with Az.Accounts and permission to publish definitions at the tenant root management group. The subscription selects authentication and alias discovery, not the definition scope.
+
+```powershell
+$deploymentParameters = @{
+	TenantId = '<customer-tenant-guid>'
+	SubscriptionId = '<customer-subscription-guid>'
+}
+& ./policy/aigovernance/Test-AiGovernance.ps1
+& ./policy/aigovernance/Deploy-AiGovernance.ps1 @deploymentParameters -WhatIf
+& ./policy/aigovernance/Deploy-AiGovernance.ps1 @deploymentParameters
+```
+
+[Deploy-AiGovernance.ps1](Deploy-AiGovernance.ps1) keeps the resource name `ai-governance-audit`, with display name **Microsoft Foundry, Azure ML and AI Services - Audit Controls**. It publishes only the five custom definitions used here and reuses 24 built-ins listed by `Get-ExpectedBuiltIns`. `Get-FoundryBindings` and the manifest's explicit `includedReferences` define the complete selection. `ExcludeBuiltInReference` is rejected because it would break the six-control contract. Older standalone files are retained but neither published nor referenced. Audit effects are fixed; the connection checks cannot support Deny because they inspect related-resource existence.
+
+The live catalogue review on 2026-09-24 found no suitable trusted-service, injection, or connection-presence built-ins among 2,862 definitions. The custom predicates use verified Cognitive Services aliases. Tests cover scope guards, absent/empty/wrong-category connections, fixed effects, model-input bindings, and obsolete-parameter migration. Offline fixtures do not simulate Azure's child enumeration, data-plane enforcement, or runtime connectivity.
+
+**Published 2026-09-24:** the tenant-root `ai-governance-audit` initiative was updated in place from 56 references to **FoundrySix 3.0.0**, with six distinct definitions, four Audit effects, and two AuditIfNotExists effects. Read-back verified all references and parameter schemas, including two active model inputs and five unused optional compatibility fields. The two retained reference-version bindings were unchanged. No dependent assignments were found across 24 checked scopes; no assignments or workload settings were changed. A verified recovery snapshot of the previous initiative was retained locally. All **454 local rule cases** and generator checks passed. Resource compliance and runtime integration remain untested until manual account-level assignment and workload validation.
+
+**Updated 2026-09-24 to 3.1.0:** built-in B04 was replaced in place by the Foundry-only `require-foundry-private-endpoint` custom audit. Read-back confirmed six references (four Audit, two AuditIfNotExists), B18 as the only built-in, and an unchanged parameter schema. No dependent assignments were found across 24 scopes. All 465 local rule cases passed.
+
+**Recreated 2026-09-24:** after confirming no assignments across 24 scopes and saving a verified snapshot, the initiative was deleted and recreated with the same name, six policy bindings, and effects. It now has exactly two parameters (`allowedModelPublishers`, `allowedModelAssetIds`) and no retired fields.
+
+**Updated 2026-09-24 to 4.0.0:** five simple Azure ML built-ins (B06, B07, B10, B29, B36) were added in place and the display name became **Microsoft Foundry and Azure ML - Audit Controls**. Read-back confirmed 11 references (eight Audit, three AuditIfNotExists), the fixed B06/B29 settings, unchanged Foundry bindings, and the same two parameters. No assignments existed across 24 scopes.
+
+**Updated 2026-09-24 to 4.1.0:** four more simple ML built-ins (B12, B16, B32, B35) were added in place. The first attempt was rejected because the description exceeded Azure's 512-character limit; nothing changed, the description was shortened, and a length test was added. Read-back confirmed 15 references (12 Audit, 3 AuditIfNotExists) and the same two parameters.
+
+**Updated 2026-09-24 to 5.0.0:** 15 simple built-ins for other AI services were added in place (B01, B04, B05, B11, B14, B17, B28, B33, B38, B39, and new manifest entries B70-B74). Read-back confirmed 30 references (25 Audit, 5 AuditIfNotExists), unchanged existing bindings, and the same two parameters. No assignments existed across 24 scopes.
+
+**Recreated 2026-09-24 as 5.1.0:** B18 (model approval, two list parameters) was removed to avoid complex inputs. After confirming no assignments across 24 scopes and saving a verified snapshot, the initiative was deleted and recreated. Read-back confirmed 29 references (24 Audit, 5 AuditIfNotExists), all other bindings unchanged, and **zero parameters**.
+
+**Updated 2026-09-24 to 5.2.0:** at the user's request, every policy effect became an optional assignment override (29 `<reference>_effect` parameters, defaults unchanged). Published in place after a verified snapshot; read-back confirmed every effect bound to its override, 24 Audit and 5 AuditIfNotExists defaults, and no other parameters.
+
+**Updated 2026-09-24 to 5.3.0:** added the custom `require-ai-system-assigned-identity` audit (AI-GOV-116) across all AI resource types that support managed identity. The initiative now has 30 references and 30 effect overrides (25 Audit and 5 AuditIfNotExists defaults).
+
+**Updated 2026-09-24 to 5.4.0:** added B30 (Search resource logs), B19 (no preview model deployments), and custom checks AI-GOV-117 (deployment content filter) and AI-GOV-118 (ML online endpoint Entra ID auth). The App Insights check (AI-GOV-112) moved from the Foundry account to each Foundry project. The initiative now has 34 references and 34 effect overrides (28 Audit and 6 AuditIfNotExists defaults).
+
+## Current Control Evidence
+
+| ID | Priority | Requirement | Evidence boundary | Implementation | Sources |
+| --- | --- | --- | --- | --- | --- |
+| AI-GOV-110 | P0 | Require trusted-service access on Foundry accounts. | Require AzureServices bypass with disabled or default-deny public access; no individual IP/subnet approval list. | L: require-foundry-trusted-services | D [CognitiveNetwork] |
+| AI-GOV-111 | P0 | Require account-level Key Vault integration. | A nonempty AzureKeyVault connection target, not CMK or an unrelated vault. | L: require-foundry-key-vault-connection | D [FoundryConnections] |
+| AI-GOV-112 | P0 | Require project-level Application Insights integration. | A nonempty AppInsights connection target on each Foundry project, not an account-level connection, diagnostic settings, or proof of telemetry delivery. | L: require-foundry-app-insights-connection | D [FoundryConnections] |
+| AI-GOV-113 | P0 | Require an approved private endpoint on Foundry accounts only. | At least one Approved connection; pending/rejected do not count. Not DNS, routing, or disabled public access. | L: require-foundry-private-endpoint | D [CognitiveNetwork] |
+| AI-GOV-114 | P0 | Audit simple Bot Service hardening. | Local auth disabled, HTTPS messaging endpoint, CMK encryption. Bot private link is B39. | B70; B71; B72; Audit | D [Baseline] |
+| AI-GOV-115 | P0 | Audit simple Health Bot hardening. | CMK encryption and Azure RBAC access control. | B73; B74; Audit | D [Baseline] |
+| AI-GOV-116 | P0 | Require a system-assigned managed identity on AI resources. | identity.type includes SystemAssigned; user-assigned-only, None, or missing is reported. Stricter than B11. | L: require-ai-system-assigned-identity | D [ManagedIdentity] |
+| AI-GOV-117 | P0 | Require a content filter on model deployments. | raiPolicyName missing, empty, or Microsoft.Nil is reported; custom filter settings are not inspected. | L: require-ai-deployment-content-filter | D [ContentFilters] |
+| AI-GOV-118 | P0 | Require Entra ID authentication on ML online endpoints. | authMode must be AADToken; Key and AMLToken are reported. Batch and serverless endpoints are not assessed. | L: require-ml-endpoint-entra-auth | D [MLEndpointAuth] |
+
+[FoundryConnections]: https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts/connections
+[ManagedIdentity]: https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview
+[ContentFilters]: https://learn.microsoft.com/azure/ai-foundry/openai/how-to/content-filters
+[MLEndpointAuth]: https://learn.microsoft.com/azure/machine-learning/how-to-authenticate-online-endpoint
+
+<details>
+<summary>Historical CoreSecurity 2.2.0 guide, superseded by the six controls above</summary>
+
+The following operational guidance describes the 2026-09-23 baseline, not the current generator or initiative. Do not use its assignment instructions for FoundrySix.
+
+## Archived Core Security Baseline
 
 A low-maintenance, audit-only organizational baseline. It keeps security configuration checks that do not require predicting future models, publishers, or AI services. **There are no model, publisher, asset-ID, service-kind, or deployment-SKU allowlists.** Only approved regions and public IP ranges must be supplied at assignment time.
 
@@ -6,7 +161,7 @@ A low-maintenance, audit-only organizational baseline. It keeps security configu
 
 ## Core Controls
 
-The initiative has **44 references from 39 definitions**: 31 reused built-ins and eight custom definitions (the tag definitions are reused). Service-specific private-endpoint checks account for most references; there is no per-model maintenance.
+The initiative has **56 references from 51 definitions**: 43 reused built-ins and eight custom definitions (the tag definitions are reused). Service-specific private-endpoint checks account for most references; there is no per-model maintenance. The simple security built-ins B58-B69 add no assignment parameters.
 
 | Area | Retained checks |
 | --- | --- |
@@ -14,7 +169,10 @@ The initiative has **44 references from 39 definitions**: 31 reused built-ins an
 | Public access | Approved public IP rules, restrictive firewall defaults, and trusted-service bypass approval. |
 | Private connectivity | Approved endpoint connections on 27 endpoint-owning resource types; telemetry membership in a Monitor Private Link Scope. |
 | Network isolation | Foundry customer-subnet injection, ML managed networking/compute VNet placement, Databricks VNet parameters, and AKS private API. |
-| Identity | Disable local/key authentication for supported AI Services, Search, and ML compute; managed identity on Cognitive Services accounts. |
+| Identity | Disable local/key authentication for supported AI Services, Search, ML compute, and AKS; managed identity on Cognitive Services accounts. |
+| Data protection | Disallow anonymous blob access; assess secure Storage/Redis transport, HTTPS-only Web Apps/Functions/Container Apps, and Key Vault deletion protection. |
+| Artifact credentials | Disable Container Registry local admin accounts and anonymous pulls. |
+| Debugging access | Disable remote debugging on applicable Web Apps and Function Apps. |
 | Diagnostics | Basic diagnostic-configuration checks for AI Services, Search, and ML; no central destination or organization-wide retention choice. |
 | Governance tags | The seven previously agreed AI tags and fixed vocabularies. |
 
@@ -42,7 +200,7 @@ The catalogue describes desired states and evidence to review. A matching rule m
 - [Deploy-AiGovernance.ps1](Deploy-AiGovernance.ps1): reusable tenant-root deployment with live preflight, fixed audit effects, `-WhatIf`, ownership checks, and read-back verification; no assignment creation.
 - [Test-AiGovernance.ps1](Test-AiGovernance.ps1): offline structural, catalogue, and focused rule checks. It does not evaluate policies in Azure.
 
-Custom JSON files contain **policy definition properties**, not ARM deployment templates. The deployment script wraps them in `properties` for Policy REST requests. The package retains eleven custom files, but only eight appear in the core initiative through thirteen references, including seven tag references. The 31 selected built-ins appear once each, producing 44 references total. The standalone [account-kind](definitions/allowed-ai-account-kinds.json), [deployment-SKU](definitions/allowed-model-deployment-skus.json), and [subnet-rule](definitions/restrict-ai-virtual-network-rules.json) files are retained but not included. Their continued presence does not require maintaining or assigning their allowlists.
+Custom JSON files contain **policy definition properties**, not ARM deployment templates. The deployment script wraps them in `properties` for Policy REST requests. The package retains eleven custom files, but only eight appear in the core initiative through thirteen references, including seven tag references. The 43 selected built-ins appear once each, producing 56 references total. The standalone [account-kind](definitions/allowed-ai-account-kinds.json), [deployment-SKU](definitions/allowed-model-deployment-skus.json), and [subnet-rule](definitions/restrict-ai-virtual-network-rules.json) files are retained but not included. Their continued presence does not require maintaining or assigning their allowlists.
 
 ## Built-In First
 
@@ -133,13 +291,17 @@ The remaining built-in settings are stable baseline constants, not assignment qu
 
 **Logging boundary:** B28 checks that diagnostic log configuration exists on Cognitive Services/Search; it does not prove every category is enabled. B29/B30 check enabled-log configuration for ML/Search. No check proves logs arrive, retention is sufficient, or someone monitors the destination. Those remain operational responsibilities.
 
+**Simple protection checks:** B58 audits anonymous blob access, not the Storage public-network endpoint. B59 audits the secure-transfer setting; review NFS and legacy-client compatibility before remediation. B60/B61 audit HTTPS-only Web Apps and applicable Function Apps, not certificates, TLS versions, or application authorization. B62 audits Key Vault soft delete and purge protection; purge protection cannot be disabled after being enabled, and Audit does not enable it. B63 audits the registry admin account, not anonymous pull or repository tokens; review dependent build and image-pull clients before changing credentials. These checks apply to all matching resources in the assignment scope, preserve built-in exceptions, and add no input fields.
+
+**Additional fixed checks:** B64 separately audits anonymous registry pulls; intentionally public registries need reviewed scope/exemptions. B65/B66 use AuditIfNotExists to check disabled remote debugging on Web Apps/Functions, not deployment slots or all runtime debugging paths; review temporary debugging exceptions. B67 checks AKS local accounts independently of private API access; verify Entra, RBAC, client, and emergency access before remediation. B68 audits Container Apps `allowInsecure=true`, not arbitrary TCP protocols or ingress existence. B69 audits the non-TLS port on `Microsoft.Cache/redis`, not Azure Managed Redis/Redis Enterprise. All are report-only with no extra input fields or workload changes.
+
 ### Workload Responsibilities
 
 Model/publisher/service approval and detailed content-filter policies are not in this initiative. Validate model suitability, licensing, data-processing geography, content safety, prompt-injection resistance, and application permissions during workload onboarding and release. In particular, **approved ARM location does not constrain Global or Data Zone inference processing** after removal of the deployment-SKU control. CMK, customer-owned storage, zone redundancy, software maintenance, and cost controls remain workload-specific decisions, not centrally maintained policy lists.
 
 After the initiative definition is updated, close and reopen the assignment form so Azure Portal reloads its parameter metadata. No assignment is created by this package. See [initiative parameter structure](https://learn.microsoft.com/azure/governance/policy/concepts/initiative-definition-structure#parameters), [saved initiative parameter limitations](https://learn.microsoft.com/azure/governance/policy/tutorials/create-and-manage#create-and-assign-an-initiative-definition), and [array parameter syntax](https://learn.microsoft.com/azure/governance/policy/how-to/author-policies-for-arrays#parameter-arrays).
 
-On **2026-09-23**, the unassigned tenant-root initiative `ai-governance-audit` was replaced with the **CoreSecurity 2.0.0** baseline. Dependency checks covered 24 management-group/subscription scopes and found no assignments. A verified recovery snapshot was retained. Azure read-back confirmed **44 references from 39 definitions** (eight custom, 31 built-in), **33 Audit and 11 AuditIfNotExists**. Compared with the previous definition, 28 policy references and 28 assignment parameters were removed: the clean form has **five active parameters, only two required**. Retained definition/version bindings were preserved; only the documented fixed ML network, logging, and storage-exclusion settings changed. No individual policy definition or assignment was modified. All model, publisher, asset, service-kind, deployment-SKU, and content-filter choices are absent. Private-endpoint coverage and the seven tags remain. Definition acceptance is separate from resource-level compliance and network testing after manual assignment.
+On **2026-09-23**, the tenant-root initiative `ai-governance-audit` was updated in place to **CoreSecurity 2.2.0**. Six further built-ins were added: B64 disabled anonymous registry pulls, B65/B66 remote debugging off for Web Apps/Functions, B67 disabled AKS local accounts, B68 Container Apps HTTPS, and B69 disabled Redis non-TLS connections. Azure read-back confirmed **56 references from 51 definitions** (eight custom, 43 built-in), **43 Audit and 13 AuditIfNotExists**. All 50 pre-existing references, their version bindings, and the complete assignment parameter schema were unchanged. The clean form still has **five active parameters, only two required**; all additions use fixed Audit or AuditIfNotExists and introduce no new inputs. No individual policy definition or assignment was modified, and no workload setting was changed. Model, publisher, asset, service-kind, deployment-SKU, and content-filter choices remain absent. Private-endpoint coverage and the seven tags remain. Definition acceptance is separate from resource-level compliance and network testing after manual assignment.
 
 ## Coverage and Boundaries
 
@@ -297,7 +459,11 @@ All references use Audit or AuditIfNotExists. Standalone Deny assignments for en
 [MonitorPrivateLink]: https://learn.microsoft.com/azure/azure-monitor/fundamentals/private-link-security
 [FabricPrivateLink]: https://learn.microsoft.com/fabric/security/security-private-links-overview
 
-## Reading the Catalogue
+</details>
+
+## Reading the Reference Catalogue
+
+This broad historical catalogue is retained for research and standalone policies. Only the six checks listed at the top are selected by the current initiative; catalogue priorities and implementation references do not imply inclusion.
 
 - **P0**: highest-priority assessments for sensitive or production workloads.
 - **P1**: next hardening and operational baseline.
@@ -356,6 +522,9 @@ IDs are identifiers grouped by domain, not a numerical ranking or a required con
 | AI-GOV-028 | P0 | Use secretless identity for Foundry connections and AI data access. | A managed-identity resource can still contain key-based tool or storage connections. | X: connection configuration checks and CI/CD secret scanning | D [CAF] [Agents] |
 | AI-GOV-029 | P0 | Enforce least privilege and time-bound privileged access. | Separate model deployment, data access, safety administration, and operator duties. | X: Entra PIM, Conditional Access, RBAC, and access reviews | G [CAF] [Agents] |
 | AI-GOV-030 | P0 | Require authenticated bot channels and AI application entry points. | Private backends do not prevent an unauthenticated application from becoming a public proxy. | C: supported host settings; X: Bot/channel, APIM, and application authorization tests | D [Agents] [Baseline] |
+| AI-GOV-107 | P0 | Audit disabled Container Registry local admin and anonymous access. | Reduce shared administrator credentials and unauthenticated image downloads; intentionally public registries need reviewed exceptions. | B63: admin account; B64: anonymous pulls; Audit | D [Baseline] |
+| AI-GOV-108 | P0 | Audit disabled remote debugging on AI Web Apps and Functions. | Detect unnecessary runtime debugging access; review development exceptions and deployment slots separately. | B65: Web Apps; B66: Function Apps; AuditIfNotExists | D [Baseline] |
+| AI-GOV-109 | P0 | Audit disabled AKS local authentication. | Private control-plane networking does not remove the local administrator credential path; verify Entra and emergency access before remediation. | B67: Audit | D [Baseline] |
 
 ## 4. Data and Cryptography
 
@@ -365,20 +534,21 @@ IDs are identifiers grouped by domain, not a numerical ranking or a required con
 | AI-GOV-032 | P1 | Assess customer-managed encryption for qualifying AI Search workloads. | Check actual index/object coverage, not just an enforcement flag. | B14: excluded optional CMK; B15 also excluded | G [Search] |
 | AI-GOV-033 | P1 | Assess customer-managed keys for qualifying ML workspaces. | Apply a workload-specific key ownership requirement where justified. | B16: excluded optional CMK | G [ML] |
 | AI-GOV-034 | P1 | Assess customer-owned storage where AI services support and require it. | Not every AI service supports or requires customer-owned storage. | B17: excluded optional storage design | G [Tools] |
-| AI-GOV-035 | P0 | Block anonymous access to AI training and grounding blobs. | Prevent accidental disclosure of documents, images, audio, or model artifacts. | C: Storage account/container public-access built-ins | D [CAF] [Baseline] |
+| AI-GOV-035 | P0 | Audit disallowed anonymous access to AI training and grounding blobs. | Detect accounts permitting anonymous blob/container reads without prohibiting authenticated access from approved public networks. | B58: Audit; preserves built-in service exclusions | D [CAF] [Baseline] |
 | AI-GOV-036 | P0 | Disable shared-key access to AI storage where dependencies support Entra. | Reduce unscoped credentials and make access attributable; assess SAS and service compatibility. | C: Storage shared-key policy plus connection migration | D [CAF] |
-| AI-GOV-037 | P0 | Require Key Vault soft delete and purge protection for AI keys. | Reduce irreversible loss of encryption keys and downstream AI data availability. | C: Key Vault recovery/protection built-ins | D [Baseline] |
+| AI-GOV-037 | P0 | Audit Key Vault soft delete and purge protection for AI keys. | Reduce irreversible loss of keys and secrets; enabling purge protection is irreversible, while Audit changes no setting. | B62: Audit; vaults only, not Managed HSM | D [Baseline] |
 | AI-GOV-038 | P1 | Enforce AI key/secret rotation and expiry policies. | Bound credential exposure and detect certificates or keys approaching expiration. | C: Key Vault data-plane policies where available; X: rotation automation and connection validation | D [CAF] |
 | AI-GOV-039 | P0 | Preserve document- and tenant-level authorization in RAG retrieval. | A secure Search service can still return another user's documents if application filtering is wrong. | X: permission-aware indexing/retrieval and cross-user negative tests | G [CAF] [Agents] |
 | AI-GOV-040 | P0 | Control sensitive data ingestion, retention, and deletion. | Cover prompts, completions, vectors, uploads, audio/images, training data, and derived copies, not just source files. | X: Purview/DLP, data contracts, service settings, and deletion evidence | G [CAF] [NIST] |
+| AI-GOV-106 | P0 | Audit secure transfer for AI data and application endpoints. | Detect insecure transport settings; runtime, authentication, TLS version, and protocol compatibility need separate validation. | B59: Storage secure transfer; B60: Web Apps HTTPS; B61: Function Apps HTTPS; B68: Container Apps HTTPS; B69: Redis non-TLS port; Audit | D [Baseline] |
 
 ## 5. Models and Supply Chain
 
 | ID | Priority | Proposed policy / scope | Why it matters | Implementation | Basis |
 | --- | --- | --- | --- | --- | --- |
 | AI-GOV-041 | P0 | Review Foundry model selection at workload onboarding. | Do not require centrally predicting every model or router member. | B18: excluded model/publisher/asset allowlists; X: workload review | G [Models] |
-| AI-GOV-042 | P0 | Review production reliance on preview models. | Evaluate changing terms, behavior, and availability for the actual workload. | B19: excluded model eligibility policy; X: workload review | G [Models] [Tools] |
-| AI-GOV-043 | P0 | Review model sourcing and licensing when required. | Apply procurement, licensing, and processing commitments without an ever-changing central publisher list. | B18, B19: excluded publisher/source choices | G [Models] |
+| AI-GOV-042 | P0 | Review production reliance on preview models. | Evaluate changing terms, behavior, and availability for the actual workload. | B19: Audit with denyPreviewModels fixed true; X: workload review | G [Models] [Tools] |
+| AI-GOV-043 | P0 | Review model sourcing and licensing when required. | Apply procurement, licensing, and processing commitments without an ever-changing central publisher list. | B18: excluded publisher list; B19: onlyAllowDirectFromAzure fixed false | G [Models] |
 | AI-GOV-044 | P0 | Review ML model provenance. | Assess the artifacts actually used by the workload instead of predicting all registry assets. | B20: excluded registry-model allowlist; X: workload evidence | G [ML] |
 | AI-GOV-045 | P0 | Assess ML deployment source registries. | Identify models supplied by an untrusted registry even when the model name appears familiar. | C: audit source registry with verified aliases; B21 excluded because it cannot audit | G [ML] |
 | AI-GOV-046 | P1 | Pin production model versions to an approved release set. | Approval of a model family or an asset prefix does not necessarily approve every version. | C: exact model/version checks using verified aliases; X for data-plane releases | D [CAF] [Models] |
@@ -463,7 +633,7 @@ IDs are identifiers grouped by domain, not a numerical ranking or a required con
 4. **Audit-only policies do not prevent deployment or runtime abuse.** Findings identify gaps for review. Evaluate the actual service guardrails and authorization separately; this pack does not install or remediate them.
 5. **Tags are assertions, not proof.** The seven AI tags support inventory and assessment routing but do not prove authorization, human approval, legal compliance, or actual model behavior.
 6. **A resource property is not automatically an Azure Policy alias.** Inspect provider aliases and test actual API versions before implementing C items. Use `All` for applicable child-resource controls and array counts for collection constraints; do not assume tags or location exist on children.
-7. **Documentation can disagree with the deployed definition.** The model deployment guide describes eligibility as GA, while the policy index lists B19 as preview. This catalogue conservatively preserves the index status. Inspect the definition in the target cloud before rollout; names, versions, effects, and availability can change.
+7. **Documentation can disagree with the deployed definition.** Older policy indexes listed B19 as preview; the live catalogue on 2026-09-24 shows it as GA 1.0.1. Inspect the definition in the target cloud before rollout; names, versions, effects, and availability can change.
 
 ## Audit Rollout
 

@@ -1,0 +1,47 @@
+{
+  "displayName": "Foundry accounts should have an approved private endpoint",
+  "description": "Audit project-enabled AIServices (Microsoft Foundry) accounts without at least one Approved private endpoint connection. Other Cognitive Services kinds and Azure AI Search are not assessed. Does not require public access to be disabled or validate DNS, routing, or subnet ownership. Audit is the default.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-113"],
+    "source": "https://learn.microsoft.com/azure/foundry/how-to/configure-private-link",
+    "builtInReview": {
+      "reviewedOn": "2026-09-24",
+      "gap": "The three live Cognitive Services private-endpoint built-ins (d6759c02, deprecated cddd188c, deploy-only db630ad5) do not filter to AIServices project-enabled accounts; d6759c02 also assesses Azure AI Search. None satisfies a Foundry-only audit."
+    }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": {
+        "displayName": "Effect",
+        "description": "Audit reports Foundry accounts without an Approved private endpoint. Deny is available only for a separate explicit assignment and can block account creation before an endpoint is approved."
+      },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts" },
+        { "field": "kind", "equals": "AIServices" },
+        { "field": "Microsoft.CognitiveServices/accounts/allowProjectManagement", "equals": true },
+        {
+          "count": {
+            "field": "Microsoft.CognitiveServices/accounts/privateEndpointConnections[*]",
+            "where": {
+              "field": "Microsoft.CognitiveServices/accounts/privateEndpointConnections[*].privateLinkServiceConnectionState.status",
+              "equals": "Approved"
+            }
+          },
+          "less": 1
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}
