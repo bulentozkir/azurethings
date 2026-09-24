@@ -1,0 +1,2326 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "AI model retirement notifier: Consumption Logic App (system-assigned identity, weekly recurrence) and a new Office 365 Outlook API connection. Workflow parameters are editable definition defaults; update them in the Logic App designer after deployment."
+  },
+  "parameters": {
+    "workflowName": {
+      "type": "string",
+      "defaultValue": "ai-model-age-notifier-95b0",
+      "minLength": 1,
+      "maxLength": 80,
+      "metadata": {
+        "description": "Name of the Logic App (Consumption) to create."
+      }
+    },
+    "office365ConnectionName": {
+      "type": "string",
+      "defaultValue": "office365-ai-model-age-notifier-95b0",
+      "minLength": 1,
+      "maxLength": 80,
+      "metadata": {
+        "description": "Name of the new Office 365 Outlook API connection. Authorize it after deployment."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Region for the Logic App and the connection. Defaults to the resource group region."
+      }
+    },
+    "workflowState": {
+      "type": "string",
+      "defaultValue": "Disabled",
+      "allowedValues": [
+        "Disabled",
+        "Enabled"
+      ],
+      "metadata": {
+        "description": "Keep Disabled until the connection is authorized and the workflow parameters are updated. Enabling may start the first run immediately."
+      }
+    },
+    "assignReaderRole": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Grant the Logic App managed identity Reader on this subscription so it can list AI deployments and model catalogs. Requires Owner or User Access Administrator. Set false to grant access manually."
+      }
+    }
+  },
+  "variables": {
+    "normalizedLocation": "[toLower(replace(parameters('location'), ' ', ''))]",
+    "office365ApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('normalizedLocation'), 'office365')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[parameters('office365ConnectionName')]",
+      "location": "[variables('normalizedLocation')]",
+      "kind": "V1",
+      "properties": {
+        "displayName": "AI model age notifier (new authorization required)",
+        "api": {
+          "id": "[variables('office365ApiId')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('workflowName')]",
+      "location": "[variables('normalizedLocation')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', parameters('office365ConnectionName'))]"
+      ],
+      "properties": {
+        "state": "[parameters('workflowState')]",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Assess_models": {
+              "actions": {
+                "For_each_deployment": {
+                  "actions": {
+                    "Any_OR_condition": {
+                      "inputs": "@or(outputs('Retirement_due_within_horizon'), outputs('Retirement_before_today'))",
+                      "runAfter": {
+                        "Retirement_due_within_horizon": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Compose"
+                    },
+                    "Append_assessment": {
+                      "inputs": {
+                        "name": "rows",
+                        "value": {
+                          "account": "@items('For_each_deployment')['account']",
+                          "assessmentStatus": "@if(outputs('Any_OR_condition'), 'Attention required', if(outputs('Retirement_date_available'), 'No condition matched', 'Unassessed'))",
+                          "deployment": "@items('For_each_deployment')['deployment']['name']",
+                          "deploymentId": "@items('For_each_deployment')['deployment']['id']",
+                          "format": "@outputs('Model_identity')['format']",
+                          "matchedConditions": "@body('Matched_OR_reasons')",
+                          "metadataNotes": "@join(variables('metadataIssues'), ' ')",
+                          "model": "@outputs('Model_identity')['name']",
+                          "reason": "@if(outputs('Any_OR_condition'), join(body('Matched_OR_reasons'), ' '), if(outputs('Retirement_date_available'), 'Model retirement date is later than the configured retirement horizon; neither retirement condition matched.', 'Model retirement date is unknown; both retirement conditions are unassessed.'))",
+                          "requiresAttention": "@outputs('Any_OR_condition')",
+                          "resourceGroup": "@items('For_each_deployment')['resourceGroup']",
+                          "retirementDate": "@variables('retirementDate')",
+                          "retirementDue": "@outputs('Retirement_due_within_horizon')",
+                          "retirementPast": "@outputs('Retirement_before_today')",
+                          "sku": "@coalesce(items('For_each_deployment')['deployment']?['sku']?['name'], '')",
+                          "subscription": "@items('For_each_deployment')['subscription']",
+                          "version": "@outputs('Model_identity')['version']"
+                        }
+                      },
+                      "runAfter": {
+                        "Retirement_date_available": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "AppendToArrayVariable"
+                    },
+                    "Catch_retirement_date": {
+                      "inputs": {
+                        "name": "metadataIssues",
+                        "value": "Model retirement date could not be parsed. Inspect Try_retirement_date; both retirement conditions are unassessed."
+                      },
+                      "runAfter": {
+                        "Try_retirement_date": [
+                          "Failed",
+                          "TimedOut"
+                        ]
+                      },
+                      "type": "AppendToArrayVariable"
+                    },
+                    "Match_model_catalog": {
+                      "inputs": {
+                        "from": "@variables('modelCatalog')",
+                        "where": "@and(contains(variables('catalogCompleteAccounts'), toLower(items('For_each_deployment')['accountId'])), equals(item()['accountId'], toLower(items('For_each_deployment')['accountId'])), not(empty(outputs('Model_identity')['format'])), not(empty(outputs('Model_identity')['name'])), not(empty(outputs('Model_identity')['version'])), equals(item()['format'], outputs('Model_identity')['format']), equals(item()['name'], outputs('Model_identity')['name']), equals(item()['version'], outputs('Model_identity')['version']))"
+                      },
+                      "runAfter": {
+                        "Model_identity": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Query"
+                    },
+                    "Matched_OR_reasons": {
+                      "inputs": {
+                        "from": [
+                          "@if(outputs('Retirement_due_within_horizon'), concat('Model retirement date is due today or within ', string(parameters('retirementHorizonMonths')), ' calendar months (inclusive).'), '')",
+                          "@if(outputs('Retirement_before_today'), 'Model retirement date is earlier than today.', '')"
+                        ],
+                        "where": "@not(empty(item()))"
+                      },
+                      "runAfter": {
+                        "Any_OR_condition": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Query"
+                    },
+                    "Model_identity": {
+                      "inputs": {
+                        "format": "@coalesce(items('For_each_deployment')['deployment']['properties']?['model']?['format'], '')",
+                        "name": "@coalesce(items('For_each_deployment')['deployment']['properties']?['model']?['name'], '')",
+                        "version": "@string(coalesce(items('For_each_deployment')['deployment']['properties']?['model']?['version'], ''))"
+                      },
+                      "runAfter": {
+                        "Validate_deployment_ownership": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Compose"
+                    },
+                    "Reset_matched_catalog": {
+                      "inputs": {
+                        "name": "matchedCatalog",
+                        "value": {}
+                      },
+                      "runAfter": {
+                        "Reset_retirement_date": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "SetVariable"
+                    },
+                    "Reset_metadata_issues": {
+                      "inputs": {
+                        "name": "metadataIssues",
+                        "value": []
+                      },
+                      "runAfter": {
+                        "Reset_matched_catalog": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "SetVariable"
+                    },
+                    "Reset_retirement_date": {
+                      "inputs": {
+                        "name": "retirementDate",
+                        "value": "@string('')"
+                      },
+                      "runAfter": {},
+                      "type": "SetVariable"
+                    },
+                    "Retirement_before_today": {
+                      "inputs": "@and(not(empty(variables('retirementDate'))), less(variables('retirementDate'), outputs('Scan_date_UTC')))",
+                      "runAfter": {
+                        "Catch_retirement_date": [
+                          "Succeeded",
+                          "Skipped"
+                        ]
+                      },
+                      "type": "Compose"
+                    },
+                    "Retirement_date_available": {
+                      "inputs": "@not(empty(variables('retirementDate')))",
+                      "runAfter": {
+                        "Matched_OR_reasons": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Compose"
+                    },
+                    "Retirement_due_within_horizon": {
+                      "inputs": "@and(not(empty(variables('retirementDate'))), greaterOrEquals(variables('retirementDate'), outputs('Scan_date_UTC')), lessOrEquals(variables('retirementDate'), outputs('Retirement_horizon')))",
+                      "runAfter": {
+                        "Retirement_before_today": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Compose"
+                    },
+                    "Try_retirement_date": {
+                      "actions": {
+                        "Has_retirement_date": {
+                          "actions": {
+                            "Accept_retirement_date": {
+                              "inputs": {
+                                "name": "retirementDate",
+                                "value": "@outputs('Parse_retirement_date_UTC')"
+                              },
+                              "runAfter": {
+                                "Parse_retirement_date_UTC": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "SetVariable"
+                            },
+                            "Parse_retirement_date_UTC": {
+                              "inputs": "@convertToUtc(variables('matchedCatalog')['retirementAt'], 'UTC', 'yyyy-MM-dd')",
+                              "runAfter": {},
+                              "type": "Compose"
+                            }
+                          },
+                          "else": {
+                            "actions": {
+                              "Missing_retirement_date": {
+                                "inputs": {
+                                  "name": "metadataIssues",
+                                  "value": "Model retirement date is unavailable; both retirement conditions are unassessed."
+                                },
+                                "runAfter": {},
+                                "type": "AppendToArrayVariable"
+                              }
+                            }
+                          },
+                          "expression": "@not(empty(coalesce(variables('matchedCatalog')?['retirementAt'], '')))",
+                          "runAfter": {},
+                          "type": "If"
+                        }
+                      },
+                      "runAfter": {
+                        "Unique_model_catalog": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "Scope"
+                    },
+                    "Unique_model_catalog": {
+                      "actions": {
+                        "Accept_model_catalog": {
+                          "inputs": {
+                            "name": "matchedCatalog",
+                            "value": "@first(body('Match_model_catalog'))"
+                          },
+                          "runAfter": {},
+                          "type": "SetVariable"
+                        }
+                      },
+                      "else": {
+                        "actions": {
+                          "Unavailable_model_catalog": {
+                            "inputs": {
+                              "name": "metadataIssues",
+                              "value": "@if(not(contains(variables('catalogCompleteAccounts'), toLower(items('For_each_deployment')['accountId']))), 'Account model catalog is incomplete; retirement is unassessed.', if(empty(body('Match_model_catalog')), 'Exact account/format/model/version catalog record was not found.', 'Conflicting exact catalog records; retirement is unassessed.'))"
+                            },
+                            "runAfter": {},
+                            "type": "AppendToArrayVariable"
+                          }
+                        }
+                      },
+                      "expression": "@equals(length(body('Match_model_catalog')), 1)",
+                      "runAfter": {
+                        "Match_model_catalog": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "If"
+                    },
+                    "Validate_deployment_ownership": {
+                      "actions": {
+                        "Deployment_ownership_error": {
+                          "inputs": {
+                            "name": "errors",
+                            "value": {
+                              "reason": "Deployment ID does not match its enumerated account and name; inventory integrity failed.",
+                              "scope": "@items('For_each_deployment')['deployment']['id']"
+                            }
+                          },
+                          "runAfter": {},
+                          "type": "AppendToArrayVariable"
+                        }
+                      },
+                      "else": {
+                        "actions": {}
+                      },
+                      "expression": "@not(equals(toLower(items('For_each_deployment')['deployment']['id']), toLower(concat(items('For_each_deployment')['accountId'], '/deployments/', items('For_each_deployment')['deployment']['name']))))",
+                      "runAfter": {
+                        "Reset_metadata_issues": [
+                          "Succeeded"
+                        ]
+                      },
+                      "type": "If"
+                    }
+                  },
+                  "foreach": "@variables('deployments')",
+                  "operationOptions": "Sequential",
+                  "runAfter": {},
+                  "type": "Foreach"
+                }
+              },
+              "runAfter": {
+                "Catch_deployment_inventory": [
+                  "Succeeded",
+                  "Skipped"
+                ]
+              },
+              "type": "Scope"
+            },
+            "Attention_models_table": {
+              "inputs": {
+                "format": "HTML",
+                "from": "@body('Encode_attention_rows')"
+              },
+              "runAfter": {
+                "Encode_errors": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Table"
+            },
+            "Catch_account_inventory": {
+              "inputs": {
+                "name": "errors",
+                "value": {
+                  "reason": "Account inventory scope failed or timed out, including a possible loop limit. Remaining inventory cannot be considered complete.",
+                  "scope": "Subscription accounts"
+                }
+              },
+              "runAfter": {
+                "Inventory_accounts": [
+                  "Failed",
+                  "TimedOut"
+                ]
+              },
+              "type": "AppendToArrayVariable"
+            },
+            "Catch_assessment": {
+              "inputs": {
+                "name": "errors",
+                "value": {
+                  "reason": "Assessment scope failed or timed out; some collected deployments may not have assessment rows. This run is partial.",
+                  "scope": "Model assessment"
+                }
+              },
+              "runAfter": {
+                "Assess_models": [
+                  "Failed",
+                  "TimedOut"
+                ]
+              },
+              "type": "AppendToArrayVariable"
+            },
+            "Catch_deployment_inventory": {
+              "inputs": {
+                "name": "errors",
+                "value": {
+                  "reason": "Deployment enumeration scope failed or timed out. Collected results below are partial, not a clean scan.",
+                  "scope": "Deployment inventory"
+                }
+              },
+              "runAfter": {
+                "Inventory_deployments": [
+                  "Failed",
+                  "TimedOut"
+                ]
+              },
+              "type": "AppendToArrayVariable"
+            },
+            "Digest_preview": {
+              "inputs": "@concat('<h2>Weekly AI model retirement assessment</h2><p>', outputs('Scan_summary')['status'], '</p><p>UTC scan date: ', outputs('Scan_date_UTC'), '.</p><p>A model requires attention if either of exactly two conditions is true (OR): (1) Model retirement date is from today through ', outputs('Retirement_horizon'), ' (today plus ', string(parameters('retirementHorizonMonths')), ' calendar months, both boundaries inclusive); OR (2) Model retirement date is strictly earlier than today.</p><p>Collected: ', string(length(variables('deployments'))), '; assessed rows: ', string(length(variables('rows'))), '; no condition matched: ', string(length(body('No_match_models'))), '; attention required: ', string(length(body('Old_models'))), '; unassessed retirement dates: ', string(length(body('Unknown_models'))), '; errors: ', string(length(variables('errors'))), '.</p><h3>Models requiring attention - matched retirement condition</h3>', body('Attention_models_table'), '<h3>Unassessed models - unknown retirement date</h3>', body('Unknown_models_table'), '<h3>Inventory / assessment errors</h3>', body('Inventory_errors_table'), '<p>Model retirement date comes only from deprecation.inference on the exact account/format/model/version catalog record. Version is an opaque identity string. Missing, invalid, conflicting or incomplete catalog metadata is Unknown / Unassessed and never triggers email by itself; no other date is substituted. Dates are compared as UTC calendar days, using calendar months rather than a fixed number of days. Email is sent only when a retirement condition matches and notifications are enabled.</p>')",
+              "runAfter": {
+                "Digest_subject": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose"
+            },
+            "Digest_subject": {
+              "inputs": "@concat(if(greater(length(variables('errors')), 0), '[PARTIAL SCAN / ERRORS] ', if(greater(length(body('Old_models')), 0), '[MODEL ATTENTION] ', '[MODEL SCAN] ')), 'Weekly AI model retirement assessment - ', outputs('Scan_date_UTC'))",
+              "runAfter": {
+                "Inventory_errors_table": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose"
+            },
+            "Encode_attention_rows": {
+              "inputs": {
+                "from": "@body('Old_models')",
+                "select": {
+                  "Account": "@replace(replace(replace(replace(replace(string(item()['account']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Deployment": "@replace(replace(replace(replace(replace(string(item()['deployment']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Deployment ID": "@replace(replace(replace(replace(replace(string(item()['deploymentId']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Format": "@replace(replace(replace(replace(replace(if(empty(item()['format']), 'Unknown / not supplied', string(item()['format'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Metadata notes": "@replace(replace(replace(replace(replace(if(empty(item()['metadataNotes']), 'None', string(item()['metadataNotes'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model": "@replace(replace(replace(replace(replace(if(empty(item()['model']), 'Unknown / not supplied', string(item()['model'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model Version": "@replace(replace(replace(replace(replace(if(empty(item()['version']), 'Unknown / not supplied', string(item()['version'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model retirement date (UTC)": "@replace(replace(replace(replace(replace(if(empty(item()['retirementDate']), 'Unknown / Unassessed', string(item()['retirementDate'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Reason": "@replace(replace(replace(replace(replace(string(item()['reason']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Resource group": "@replace(replace(replace(replace(replace(string(item()['resourceGroup']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "SKU": "@replace(replace(replace(replace(replace(if(empty(item()['sku']), 'Unknown / not supplied', string(item()['sku'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Subscription": "@replace(replace(replace(replace(replace(string(item()['subscription']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')"
+                }
+              },
+              "runAfter": {
+                "Scan_summary": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Select"
+            },
+            "Encode_errors": {
+              "inputs": {
+                "from": "@variables('errors')",
+                "select": {
+                  "Error": "@replace(replace(replace(replace(replace(string(item()['reason']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Scope": "@replace(replace(replace(replace(replace(string(item()['scope']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')"
+                }
+              },
+              "runAfter": {
+                "Encode_unknown_rows": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Select"
+            },
+            "Encode_unknown_rows": {
+              "inputs": {
+                "from": "@body('Unknown_models')",
+                "select": {
+                  "Account": "@replace(replace(replace(replace(replace(string(item()['account']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Deployment": "@replace(replace(replace(replace(replace(string(item()['deployment']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Deployment ID": "@replace(replace(replace(replace(replace(string(item()['deploymentId']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Format": "@replace(replace(replace(replace(replace(if(empty(item()['format']), 'Unknown / not supplied', string(item()['format'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Metadata notes": "@replace(replace(replace(replace(replace(if(empty(item()['metadataNotes']), 'None', string(item()['metadataNotes'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model": "@replace(replace(replace(replace(replace(if(empty(item()['model']), 'Unknown / not supplied', string(item()['model'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model Version": "@replace(replace(replace(replace(replace(if(empty(item()['version']), 'Unknown / not supplied', string(item()['version'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Model retirement date (UTC)": "@replace(replace(replace(replace(replace(if(empty(item()['retirementDate']), 'Unknown / Unassessed', string(item()['retirementDate'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Reason": "@replace(replace(replace(replace(replace(string(item()['reason']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Resource group": "@replace(replace(replace(replace(replace(string(item()['resourceGroup']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "SKU": "@replace(replace(replace(replace(replace(if(empty(item()['sku']), 'Unknown / not supplied', string(item()['sku'])), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')",
+                  "Subscription": "@replace(replace(replace(replace(replace(string(item()['subscription']), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '\"', '&quot;'), decodeUriComponent('%27'), '&#39;')"
+                }
+              },
+              "runAfter": {
+                "Encode_attention_rows": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Select"
+            },
+            "Fail_if_partial_scan": {
+              "actions": {
+                "Terminate_incomplete_scan": {
+                  "inputs": {
+                    "runError": {
+                      "code": "IncompleteModelInventory",
+                      "message": "The scan is partial or contains inventory/assessment errors. Inspect Scan_summary and the failed scopes. Sending was attempted only if explicitly enabled."
+                    },
+                    "runStatus": "Failed"
+                  },
+                  "runAfter": {},
+                  "type": "Terminate"
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "expression": "@greater(length(variables('errors')), 0)",
+              "runAfter": {
+                "Send_only_when_approved_and_attention": [
+                  "Succeeded"
+                ]
+              },
+              "type": "If"
+            },
+            "Initialize_account_next": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "accountNext",
+                    "type": "string",
+                    "value": ""
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_subscriptions_attempted": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_account_page": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "accountPage",
+                    "type": "integer",
+                    "value": 0
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_account_next": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_account_seen": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "accountSeen",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_account_page": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_catalog": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "modelCatalog",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_deployment_seen": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_catalog_failed": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "catalogFailed",
+                    "type": "boolean",
+                    "value": false
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_catalog_page": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_catalog_next": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "catalogNext",
+                    "type": "string",
+                    "value": ""
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_complete_catalogs": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_catalog_page": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "catalogPage",
+                    "type": "integer",
+                    "value": 0
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_catalog_seen": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_catalog_seen": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "catalogSeen",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_catalog_next": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_complete_catalogs": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "catalogCompleteAccounts",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_catalog": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_deployment_next": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "deploymentNext",
+                    "type": "string",
+                    "value": ""
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_account_seen": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_deployment_page": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "deploymentPage",
+                    "type": "integer",
+                    "value": 0
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_deployment_next": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_deployment_seen": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "deploymentSeen",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_deployment_page": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_deployments": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "deployments",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Retirement_horizon": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_errors": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "errors",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_rows": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_matched_catalog": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "matchedCatalog",
+                    "type": "object",
+                    "value": {}
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_catalog_failed": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_metadata_issues": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "metadataIssues",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_retirement_date": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_retirement_date": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "retirementDate",
+                    "type": "string",
+                    "value": ""
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_matched_catalog": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_rows": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "rows",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_deployments": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_scan": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "accounts",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_metadata_issues": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Initialize_subscriptions_attempted": {
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "subscriptionsAttempted",
+                    "type": "array",
+                    "value": []
+                  }
+                ]
+              },
+              "runAfter": {
+                "Initialize_errors": [
+                  "Succeeded"
+                ]
+              },
+              "type": "InitializeVariable"
+            },
+            "Inventory_accounts": {
+              "actions": {
+                "Assert_scan_parameters": {
+                  "inputs": {
+                    "content": {
+                      "maxPages": "@parameters('maxPages')",
+                      "subscriptionId": "@parameters('subscriptionId')"
+                    },
+                    "schema": {
+                      "properties": {
+                        "maxPages": {
+                          "maximum": 100,
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "subscriptionId": {
+                          "items": {
+                            "maxLength": 36,
+                            "minLength": 36,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 1,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "subscriptionId",
+                        "maxPages"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "runAfter": {},
+                  "type": "ParseJson"
+                },
+                "For_each_subscription": {
+                  "actions": {
+                    "Catch_subscription_inventory": {
+                      "inputs": {
+                        "name": "errors",
+                        "value": {
+                          "reason": "Subscription validation or inventory scope failed/timed out. This subscription was not fully assessed; other subscription scans continue.",
+                          "scope": "@items('For_each_subscription')"
+                        }
+                      },
+                      "runAfter": {
+                        "Try_subscription_inventory": [
+                          "Failed",
+                          "TimedOut"
+                        ]
+                      },
+                      "type": "AppendToArrayVariable"
+                    },
+                    "Try_subscription_inventory": {
+                      "actions": {
+                        "Normalize_subscription_id": {
+                          "inputs": "@toLower(items('For_each_subscription'))",
+                          "runAfter": {},
+                          "type": "Compose"
+                        },
+                        "Subscription_not_processed": {
+                          "actions": {
+                            "Account_collection_path": {
+                              "inputs": "@concat('/subscriptions/', outputs('Normalize_subscription_id'), '/providers/Microsoft.CognitiveServices/accounts')",
+                              "runAfter": {
+                                "Reset_account_seen": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "Compose"
+                            },
+                            "Account_page_limit_reached": {
+                              "actions": {
+                                "Account_page_limit_error": {
+                                  "inputs": {
+                                    "name": "errors",
+                                    "value": {
+                                      "reason": "The account pagination limit was reached with another page remaining; inventory is incomplete.",
+                                      "scope": "@outputs('Normalize_subscription_id')"
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "type": "AppendToArrayVariable"
+                                }
+                              },
+                              "else": {
+                                "actions": {}
+                              },
+                              "expression": "@not(empty(variables('accountNext')))",
+                              "runAfter": {
+                                "Until_account_pages": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "If"
+                            },
+                            "Record_subscription_attempt": {
+                              "inputs": {
+                                "name": "subscriptionsAttempted",
+                                "value": "@outputs('Normalize_subscription_id')"
+                              },
+                              "runAfter": {},
+                              "type": "AppendToArrayVariable"
+                            },
+                            "Reset_account_next": {
+                              "inputs": {
+                                "name": "accountNext",
+                                "value": "@concat('https://management.azure.com/subscriptions/', outputs('Normalize_subscription_id'), '/providers/Microsoft.CognitiveServices/accounts?api-version=2024-10-01')"
+                              },
+                              "runAfter": {
+                                "Record_subscription_attempt": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "SetVariable"
+                            },
+                            "Reset_account_page": {
+                              "inputs": {
+                                "name": "accountPage",
+                                "value": 0
+                              },
+                              "runAfter": {
+                                "Reset_account_next": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "SetVariable"
+                            },
+                            "Reset_account_seen": {
+                              "inputs": {
+                                "name": "accountSeen",
+                                "value": []
+                              },
+                              "runAfter": {
+                                "Reset_account_page": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "SetVariable"
+                            },
+                            "Until_account_pages": {
+                              "actions": {
+                                "Catch_account_page": {
+                                  "actions": {
+                                    "Account_page_failure": {
+                                      "inputs": {
+                                        "name": "errors",
+                                        "value": {
+                                          "reason": "Account page request, URI parsing, schema validation or collection failed. Inspect Try_account_page in run history; inventory is incomplete.",
+                                          "scope": "@outputs('Normalize_subscription_id')"
+                                        }
+                                      },
+                                      "runAfter": {},
+                                      "type": "AppendToArrayVariable"
+                                    },
+                                    "Stop_failed_account_pages": {
+                                      "inputs": {
+                                        "name": "accountNext",
+                                        "value": "@string('')"
+                                      },
+                                      "runAfter": {
+                                        "Account_page_failure": [
+                                          "Succeeded"
+                                        ]
+                                      },
+                                      "type": "SetVariable"
+                                    }
+                                  },
+                                  "runAfter": {
+                                    "Try_account_page": [
+                                      "Failed",
+                                      "TimedOut"
+                                    ]
+                                  },
+                                  "type": "Scope"
+                                },
+                                "Increment_account_page": {
+                                  "inputs": {
+                                    "name": "accountPage",
+                                    "value": 1
+                                  },
+                                  "runAfter": {
+                                    "Catch_account_page": [
+                                      "Succeeded",
+                                      "Skipped"
+                                    ]
+                                  },
+                                  "type": "IncrementVariable"
+                                },
+                                "Try_account_page": {
+                                  "actions": {
+                                    "Account_URI_is_safe": {
+                                      "actions": {
+                                        "Collect_accounts": {
+                                          "actions": {
+                                            "Append_account": {
+                                              "inputs": {
+                                                "name": "accounts",
+                                                "value": "@setProperty(items('Collect_accounts'), 'scanSubscriptionId', outputs('Normalize_subscription_id'))"
+                                              },
+                                              "runAfter": {},
+                                              "type": "AppendToArrayVariable"
+                                            }
+                                          },
+                                          "foreach": "@body('Filter_AI_accounts')",
+                                          "operationOptions": "Sequential",
+                                          "runAfter": {
+                                            "Filter_AI_accounts": [
+                                              "Succeeded"
+                                            ]
+                                          },
+                                          "type": "Foreach"
+                                        },
+                                        "Filter_AI_accounts": {
+                                          "inputs": {
+                                            "from": "@body('Parse_account_page')['value']",
+                                            "where": "@or(equals(item()['kind'], 'OpenAI'), equals(item()['kind'], 'AIServices'))"
+                                          },
+                                          "runAfter": {
+                                            "Parse_account_page": [
+                                              "Succeeded"
+                                            ]
+                                          },
+                                          "type": "Query"
+                                        },
+                                        "GET_accounts": {
+                                          "inputs": {
+                                            "authentication": {
+                                              "audience": "https://management.azure.com/",
+                                              "type": "ManagedServiceIdentity"
+                                            },
+                                            "method": "GET",
+                                            "retryPolicy": {
+                                              "count": 4,
+                                              "interval": "PT5S",
+                                              "maximumInterval": "PT1M",
+                                              "minimumInterval": "PT5S",
+                                              "type": "exponential"
+                                            },
+                                            "uri": "@variables('accountNext')"
+                                          },
+                                          "operationOptions": "DisableAsyncPattern",
+                                          "runAfter": {
+                                            "Remember_account_page": [
+                                              "Succeeded"
+                                            ]
+                                          },
+                                          "type": "Http"
+                                        },
+                                        "Next_account_page": {
+                                          "inputs": {
+                                            "name": "accountNext",
+                                            "value": "@coalesce(body('Parse_account_page')?['nextLink'], '')"
+                                          },
+                                          "runAfter": {
+                                            "Collect_accounts": [
+                                              "Succeeded"
+                                            ]
+                                          },
+                                          "type": "SetVariable"
+                                        },
+                                        "Parse_account_page": {
+                                          "inputs": {
+                                            "content": "@body('GET_accounts')",
+                                            "schema": {
+                                              "properties": {
+                                                "nextLink": {
+                                                  "type": [
+                                                    "string",
+                                                    "null"
+                                                  ]
+                                                },
+                                                "value": {
+                                                  "items": {
+                                                    "properties": {
+                                                      "id": {
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                      },
+                                                      "kind": {
+                                                        "type": "string"
+                                                      },
+                                                      "name": {
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "id",
+                                                      "name",
+                                                      "kind"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  "maxItems": 1000,
+                                                  "type": "array"
+                                                }
+                                              },
+                                              "required": [
+                                                "value"
+                                              ],
+                                              "type": "object"
+                                            }
+                                          },
+                                          "runAfter": {
+                                            "GET_accounts": [
+                                              "Succeeded"
+                                            ]
+                                          },
+                                          "type": "ParseJson"
+                                        },
+                                        "Remember_account_page": {
+                                          "inputs": {
+                                            "name": "accountSeen",
+                                            "value": "@variables('accountNext')"
+                                          },
+                                          "runAfter": {},
+                                          "type": "AppendToArrayVariable"
+                                        }
+                                      },
+                                      "else": {
+                                        "actions": {
+                                          "Stop_unsafe_account_pages": {
+                                            "inputs": {
+                                              "name": "accountNext",
+                                              "value": "@string('')"
+                                            },
+                                            "runAfter": {
+                                              "Unsafe_account_URI_error": [
+                                                "Succeeded"
+                                              ]
+                                            },
+                                            "type": "SetVariable"
+                                          },
+                                          "Unsafe_account_URI_error": {
+                                            "inputs": {
+                                              "name": "errors",
+                                              "value": {
+                                                "reason": "Unsafe, wrong-collection or repeated account page URL was rejected; inventory is incomplete.",
+                                                "scope": "@outputs('Normalize_subscription_id')"
+                                              }
+                                            },
+                                            "runAfter": {},
+                                            "type": "AppendToArrayVariable"
+                                          }
+                                        }
+                                      },
+                                      "expression": "@and(startsWith(toLower(variables('accountNext')), toLower(concat('https://management.azure.com', outputs('Account_collection_path'), '?'))), equals(uriScheme(variables('accountNext')), 'https'), equals(uriHost(variables('accountNext')), 'management.azure.com'), equals(uriPort(variables('accountNext')), 443), equals(toLower(uriPath(variables('accountNext'))), toLower(outputs('Account_collection_path'))), not(contains(variables('accountNext'), '#')), not(contains(variables('accountNext'), decodeUriComponent('%5C'))), not(contains(variables('accountSeen'), variables('accountNext'))))",
+                                      "runAfter": {},
+                                      "type": "If"
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "type": "Scope"
+                                }
+                              },
+                              "expression": "@or(empty(variables('accountNext')), greaterOrEquals(variables('accountPage'), parameters('maxPages')))",
+                              "limit": {
+                                "count": 100,
+                                "timeout": "PT30M"
+                              },
+                              "operationOptions": "FailWhenLimitsReached",
+                              "runAfter": {
+                                "Account_collection_path": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "type": "Until"
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "expression": "@not(contains(variables('subscriptionsAttempted'), outputs('Normalize_subscription_id')))",
+                          "runAfter": {
+                            "Validate_subscription_id": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "If"
+                        },
+                        "Validate_subscription_id": {
+                          "inputs": {
+                            "content": {
+                              "valid": "@and(equals(length(outputs('Normalize_subscription_id')), 36), equals(substring(outputs('Normalize_subscription_id'), 8, 1), '-'), equals(substring(outputs('Normalize_subscription_id'), 13, 1), '-'), equals(substring(outputs('Normalize_subscription_id'), 18, 1), '-'), equals(substring(outputs('Normalize_subscription_id'), 23, 1), '-'), equals(length(replace(outputs('Normalize_subscription_id'), '-', '')), 32), empty(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(outputs('Normalize_subscription_id'), '-', ''), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')))"
+                            },
+                            "schema": {
+                              "properties": {
+                                "valid": {
+                                  "enum": [
+                                    true
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "valid"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "runAfter": {
+                            "Normalize_subscription_id": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "ParseJson"
+                        }
+                      },
+                      "runAfter": {},
+                      "type": "Scope"
+                    }
+                  },
+                  "foreach": "@union(parameters('subscriptionId'), parameters('subscriptionId'))",
+                  "operationOptions": "Sequential",
+                  "runAfter": {
+                    "Assert_scan_parameters": [
+                      "Succeeded"
+                    ]
+                  },
+                  "type": "Foreach"
+                }
+              },
+              "runAfter": {
+                "Initialize_scan": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Scope"
+            },
+            "Inventory_deployments": {
+              "actions": {
+                "For_each_account": {
+                  "actions": {
+                    "Catch_account_deployments": {
+                      "inputs": {
+                        "name": "errors",
+                        "value": {
+                          "reason": "Account ID validation, deployment inventory or model catalog scope failed/timed out, possibly at a loop limit. This account was not fully assessed.",
+                          "scope": "@items('For_each_account')['id']"
+                        }
+                      },
+                      "runAfter": {
+                        "Try_account_deployments": [
+                          "Failed",
+                          "TimedOut"
+                        ]
+                      },
+                      "type": "AppendToArrayVariable"
+                    },
+                    "Try_account_deployments": {
+                      "actions": {
+                        "Account_ID_parts": {
+                          "inputs": "@split(items('For_each_account')['id'], '/')",
+                          "runAfter": {},
+                          "type": "Compose"
+                        },
+                        "Catalog_page_limit_reached": {
+                          "actions": {
+                            "Catalog_page_limit_error": {
+                              "inputs": {
+                                "name": "errors",
+                                "value": {
+                                  "reason": "Model catalog page limit reached; metadata for this account is incomplete.",
+                                  "scope": "@outputs('Model_collection_path')"
+                                }
+                              },
+                              "runAfter": {},
+                              "type": "AppendToArrayVariable"
+                            }
+                          },
+                          "else": {
+                            "actions": {
+                              "Catalog_completed_without_error": {
+                                "actions": {
+                                  "Record_complete_catalog": {
+                                    "inputs": {
+                                      "name": "catalogCompleteAccounts",
+                                      "value": "@toLower(items('For_each_account')['id'])"
+                                    },
+                                    "runAfter": {},
+                                    "type": "AppendToArrayVariable"
+                                  }
+                                },
+                                "else": {
+                                  "actions": {}
+                                },
+                                "expression": "@not(variables('catalogFailed'))",
+                                "runAfter": {},
+                                "type": "If"
+                              }
+                            }
+                          },
+                          "expression": "@not(empty(variables('catalogNext')))",
+                          "runAfter": {
+                            "Until_catalog_pages": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "If"
+                        },
+                        "Deployment_collection_path": {
+                          "inputs": "@concat(items('For_each_account')['id'], '/deployments')",
+                          "runAfter": {
+                            "Validate_account_ID": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "Compose"
+                        },
+                        "Deployment_page_limit_reached": {
+                          "actions": {
+                            "Deployment_page_limit_error": {
+                              "inputs": {
+                                "name": "errors",
+                                "value": {
+                                  "reason": "The deployment pagination limit was reached with another page remaining; this account inventory is incomplete.",
+                                  "scope": "@items('For_each_account')['id']"
+                                }
+                              },
+                              "runAfter": {},
+                              "type": "AppendToArrayVariable"
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "expression": "@not(empty(variables('deploymentNext')))",
+                          "runAfter": {
+                            "Until_deployment_pages": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "If"
+                        },
+                        "Model_collection_path": {
+                          "inputs": "@concat(items('For_each_account')['id'], '/models')",
+                          "runAfter": {
+                            "Deployment_page_limit_reached": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "Compose"
+                        },
+                        "Reset_catalog_failure": {
+                          "inputs": {
+                            "name": "catalogFailed",
+                            "value": false
+                          },
+                          "runAfter": {
+                            "Reset_catalog_page": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_catalog_next": {
+                          "inputs": {
+                            "name": "catalogNext",
+                            "value": "@concat('https://management.azure.com', outputs('Model_collection_path'), '?api-version=2024-10-01')"
+                          },
+                          "runAfter": {
+                            "Model_collection_path": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_catalog_page": {
+                          "inputs": {
+                            "name": "catalogPage",
+                            "value": 0
+                          },
+                          "runAfter": {
+                            "Reset_catalog_seen": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_catalog_seen": {
+                          "inputs": {
+                            "name": "catalogSeen",
+                            "value": []
+                          },
+                          "runAfter": {
+                            "Reset_catalog_next": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_deployment_next": {
+                          "inputs": {
+                            "name": "deploymentNext",
+                            "value": "@concat('https://management.azure.com', outputs('Deployment_collection_path'), '?api-version=2024-10-01')"
+                          },
+                          "runAfter": {
+                            "Deployment_collection_path": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_deployment_page": {
+                          "inputs": {
+                            "name": "deploymentPage",
+                            "value": 0
+                          },
+                          "runAfter": {
+                            "Reset_deployment_next": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Reset_deployment_seen": {
+                          "inputs": {
+                            "name": "deploymentSeen",
+                            "value": []
+                          },
+                          "runAfter": {
+                            "Reset_deployment_page": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "SetVariable"
+                        },
+                        "Until_catalog_pages": {
+                          "actions": {
+                            "Catch_catalog_page": {
+                              "actions": {
+                                "Catalog_page_error": {
+                                  "inputs": {
+                                    "name": "errors",
+                                    "value": {
+                                      "reason": "Model catalog request, schema, unsafe or repeated page URL failed. Inspect Try_catalog_page; model metadata for this account is incomplete.",
+                                      "scope": "@outputs('Model_collection_path')"
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "type": "AppendToArrayVariable"
+                                },
+                                "Mark_catalog_failed": {
+                                  "inputs": {
+                                    "name": "catalogFailed",
+                                    "value": true
+                                  },
+                                  "runAfter": {
+                                    "Catalog_page_error": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "SetVariable"
+                                },
+                                "Stop_failed_catalog_pages": {
+                                  "inputs": {
+                                    "name": "catalogNext",
+                                    "value": "@string('')"
+                                  },
+                                  "runAfter": {
+                                    "Mark_catalog_failed": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "SetVariable"
+                                }
+                              },
+                              "runAfter": {
+                                "Try_catalog_page": [
+                                  "Failed",
+                                  "TimedOut"
+                                ]
+                              },
+                              "type": "Scope"
+                            },
+                            "Increment_catalog_page": {
+                              "inputs": {
+                                "name": "catalogPage",
+                                "value": 1
+                              },
+                              "runAfter": {
+                                "Catch_catalog_page": [
+                                  "Succeeded",
+                                  "Skipped"
+                                ]
+                              },
+                              "type": "IncrementVariable"
+                            },
+                            "Try_catalog_page": {
+                              "actions": {
+                                "GET_model_catalog": {
+                                  "inputs": {
+                                    "authentication": {
+                                      "audience": "https://management.azure.com/",
+                                      "type": "ManagedServiceIdentity"
+                                    },
+                                    "method": "GET",
+                                    "retryPolicy": {
+                                      "count": 4,
+                                      "interval": "PT5S",
+                                      "maximumInterval": "PT1M",
+                                      "minimumInterval": "PT5S",
+                                      "type": "exponential"
+                                    },
+                                    "uri": "@variables('catalogNext')"
+                                  },
+                                  "operationOptions": "DisableAsyncPattern",
+                                  "runAfter": {
+                                    "Remember_catalog_page": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "Http"
+                                },
+                                "Merge_catalog_page": {
+                                  "inputs": "@union(variables('modelCatalog'), body('Normalize_catalog_page'))",
+                                  "runAfter": {
+                                    "Normalize_catalog_page": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "Compose"
+                                },
+                                "Next_catalog_page": {
+                                  "inputs": {
+                                    "name": "catalogNext",
+                                    "value": "@coalesce(body('Parse_catalog_page')?['nextLink'], '')"
+                                  },
+                                  "runAfter": {
+                                    "Store_catalog_page": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "SetVariable"
+                                },
+                                "Normalize_catalog_page": {
+                                  "inputs": {
+                                    "from": "@body('Parse_catalog_page')['value']",
+                                    "select": {
+                                      "accountId": "@toLower(items('For_each_account')['id'])",
+                                      "format": "@string(coalesce(item()?['format'], ''))",
+                                      "name": "@string(coalesce(item()?['name'], ''))",
+                                      "retirementAt": "@string(coalesce(item()?['deprecation']?['inference'], ''))",
+                                      "version": "@string(coalesce(item()?['version'], ''))"
+                                    }
+                                  },
+                                  "runAfter": {
+                                    "Parse_catalog_page": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "Select"
+                                },
+                                "Parse_catalog_page": {
+                                  "inputs": {
+                                    "content": "@body('GET_model_catalog')",
+                                    "schema": {
+                                      "properties": {
+                                        "nextLink": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "value": {
+                                          "items": {
+                                            "type": "object"
+                                          },
+                                          "type": "array"
+                                        }
+                                      },
+                                      "required": [
+                                        "value"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "runAfter": {
+                                    "GET_model_catalog": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "ParseJson"
+                                },
+                                "Remember_catalog_page": {
+                                  "inputs": {
+                                    "name": "catalogSeen",
+                                    "value": "@variables('catalogNext')"
+                                  },
+                                  "runAfter": {
+                                    "Validate_catalog_URI": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "AppendToArrayVariable"
+                                },
+                                "Store_catalog_page": {
+                                  "inputs": {
+                                    "name": "modelCatalog",
+                                    "value": "@outputs('Merge_catalog_page')"
+                                  },
+                                  "runAfter": {
+                                    "Merge_catalog_page": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "SetVariable"
+                                },
+                                "Validate_catalog_URI": {
+                                  "inputs": {
+                                    "content": {
+                                      "valid": "@and(startsWith(toLower(variables('catalogNext')), toLower(concat('https://management.azure.com', outputs('Model_collection_path'), '?'))), equals(uriScheme(variables('catalogNext')), 'https'), equals(uriHost(variables('catalogNext')), 'management.azure.com'), equals(uriPort(variables('catalogNext')), 443), equals(toLower(uriPath(variables('catalogNext'))), toLower(outputs('Model_collection_path'))), not(contains(variables('catalogNext'), '#')), not(contains(variables('catalogNext'), decodeUriComponent('%5C'))), not(contains(variables('catalogSeen'), variables('catalogNext'))))"
+                                    },
+                                    "schema": {
+                                      "properties": {
+                                        "valid": {
+                                          "enum": [
+                                            true
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "valid"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "type": "ParseJson"
+                                }
+                              },
+                              "runAfter": {},
+                              "type": "Scope"
+                            }
+                          },
+                          "expression": "@or(empty(variables('catalogNext')), greaterOrEquals(variables('catalogPage'), parameters('maxPages')))",
+                          "limit": {
+                            "count": 100,
+                            "timeout": "PT30M"
+                          },
+                          "operationOptions": "FailWhenLimitsReached",
+                          "runAfter": {
+                            "Reset_catalog_failure": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "Until"
+                        },
+                        "Until_deployment_pages": {
+                          "actions": {
+                            "Catch_deployment_page": {
+                              "actions": {
+                                "Deployment_page_failure": {
+                                  "inputs": {
+                                    "name": "errors",
+                                    "value": {
+                                      "reason": "Deployment request, URI parsing, schema validation or collection failed. Inspect Try_deployment_page in run history; this account inventory is incomplete.",
+                                      "scope": "@items('For_each_account')['id']"
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "type": "AppendToArrayVariable"
+                                },
+                                "Stop_failed_deployment_pages": {
+                                  "inputs": {
+                                    "name": "deploymentNext",
+                                    "value": "@string('')"
+                                  },
+                                  "runAfter": {
+                                    "Deployment_page_failure": [
+                                      "Succeeded"
+                                    ]
+                                  },
+                                  "type": "SetVariable"
+                                }
+                              },
+                              "runAfter": {
+                                "Try_deployment_page": [
+                                  "Failed",
+                                  "TimedOut"
+                                ]
+                              },
+                              "type": "Scope"
+                            },
+                            "Increment_deployment_page": {
+                              "inputs": {
+                                "name": "deploymentPage",
+                                "value": 1
+                              },
+                              "runAfter": {
+                                "Catch_deployment_page": [
+                                  "Succeeded",
+                                  "Skipped"
+                                ]
+                              },
+                              "type": "IncrementVariable"
+                            },
+                            "Try_deployment_page": {
+                              "actions": {
+                                "Deployment_URI_is_safe": {
+                                  "actions": {
+                                    "Collect_deployments": {
+                                      "actions": {
+                                        "Append_deployment": {
+                                          "inputs": {
+                                            "name": "deployments",
+                                            "value": {
+                                              "account": "@items('For_each_account')['name']",
+                                              "accountId": "@items('For_each_account')['id']",
+                                              "deployment": "@items('Collect_deployments')",
+                                              "resourceGroup": "@outputs('Account_ID_parts')[4]",
+                                              "subscription": "@items('For_each_account')['scanSubscriptionId']"
+                                            }
+                                          },
+                                          "runAfter": {},
+                                          "type": "AppendToArrayVariable"
+                                        }
+                                      },
+                                      "foreach": "@body('Parse_deployment_page')['value']",
+                                      "operationOptions": "Sequential",
+                                      "runAfter": {
+                                        "Parse_deployment_page": [
+                                          "Succeeded"
+                                        ]
+                                      },
+                                      "type": "Foreach"
+                                    },
+                                    "GET_deployments": {
+                                      "inputs": {
+                                        "authentication": {
+                                          "audience": "https://management.azure.com/",
+                                          "type": "ManagedServiceIdentity"
+                                        },
+                                        "method": "GET",
+                                        "retryPolicy": {
+                                          "count": 4,
+                                          "interval": "PT5S",
+                                          "maximumInterval": "PT1M",
+                                          "minimumInterval": "PT5S",
+                                          "type": "exponential"
+                                        },
+                                        "uri": "@variables('deploymentNext')"
+                                      },
+                                      "operationOptions": "DisableAsyncPattern",
+                                      "runAfter": {
+                                        "Remember_deployment_page": [
+                                          "Succeeded"
+                                        ]
+                                      },
+                                      "type": "Http"
+                                    },
+                                    "Next_deployment_page": {
+                                      "inputs": {
+                                        "name": "deploymentNext",
+                                        "value": "@coalesce(body('Parse_deployment_page')?['nextLink'], '')"
+                                      },
+                                      "runAfter": {
+                                        "Collect_deployments": [
+                                          "Succeeded"
+                                        ]
+                                      },
+                                      "type": "SetVariable"
+                                    },
+                                    "Parse_deployment_page": {
+                                      "inputs": {
+                                        "content": "@body('GET_deployments')",
+                                        "schema": {
+                                          "properties": {
+                                            "nextLink": {
+                                              "type": [
+                                                "string",
+                                                "null"
+                                              ]
+                                            },
+                                            "value": {
+                                              "items": {
+                                                "properties": {
+                                                  "id": {
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "minLength": 1,
+                                                    "type": "string"
+                                                  },
+                                                  "properties": {
+                                                    "properties": {
+                                                      "model": {
+                                                        "properties": {
+                                                          "format": {
+                                                            "type": [
+                                                              "string",
+                                                              "null"
+                                                            ]
+                                                          },
+                                                          "name": {
+                                                            "type": [
+                                                              "string",
+                                                              "null"
+                                                            ]
+                                                          },
+                                                          "version": {
+                                                            "type": [
+                                                              "string",
+                                                              "null"
+                                                            ]
+                                                          }
+                                                        },
+                                                        "type": [
+                                                          "object",
+                                                          "null"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "type": "object"
+                                                  },
+                                                  "sku": {
+                                                    "type": [
+                                                      "object",
+                                                      "null"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "id",
+                                                  "name",
+                                                  "properties"
+                                                ],
+                                                "type": "object"
+                                              },
+                                              "maxItems": 1000,
+                                              "type": "array"
+                                            }
+                                          },
+                                          "required": [
+                                            "value"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      },
+                                      "runAfter": {
+                                        "GET_deployments": [
+                                          "Succeeded"
+                                        ]
+                                      },
+                                      "type": "ParseJson"
+                                    },
+                                    "Remember_deployment_page": {
+                                      "inputs": {
+                                        "name": "deploymentSeen",
+                                        "value": "@variables('deploymentNext')"
+                                      },
+                                      "runAfter": {},
+                                      "type": "AppendToArrayVariable"
+                                    }
+                                  },
+                                  "else": {
+                                    "actions": {
+                                      "Stop_unsafe_deployment_pages": {
+                                        "inputs": {
+                                          "name": "deploymentNext",
+                                          "value": "@string('')"
+                                        },
+                                        "runAfter": {
+                                          "Unsafe_deployment_URI_error": [
+                                            "Succeeded"
+                                          ]
+                                        },
+                                        "type": "SetVariable"
+                                      },
+                                      "Unsafe_deployment_URI_error": {
+                                        "inputs": {
+                                          "name": "errors",
+                                          "value": {
+                                            "reason": "Unsafe, wrong-account/collection or repeated deployment page URL was rejected; this account inventory is incomplete.",
+                                            "scope": "@items('For_each_account')['id']"
+                                          }
+                                        },
+                                        "runAfter": {},
+                                        "type": "AppendToArrayVariable"
+                                      }
+                                    }
+                                  },
+                                  "expression": "@and(startsWith(toLower(variables('deploymentNext')), toLower(concat('https://management.azure.com', outputs('Deployment_collection_path'), '?'))), equals(uriScheme(variables('deploymentNext')), 'https'), equals(uriHost(variables('deploymentNext')), 'management.azure.com'), equals(uriPort(variables('deploymentNext')), 443), equals(toLower(uriPath(variables('deploymentNext'))), toLower(outputs('Deployment_collection_path'))), not(contains(variables('deploymentNext'), '#')), not(contains(variables('deploymentNext'), decodeUriComponent('%5C'))), not(contains(variables('deploymentSeen'), variables('deploymentNext'))))",
+                                  "runAfter": {},
+                                  "type": "If"
+                                }
+                              },
+                              "runAfter": {},
+                              "type": "Scope"
+                            }
+                          },
+                          "expression": "@or(empty(variables('deploymentNext')), greaterOrEquals(variables('deploymentPage'), parameters('maxPages')))",
+                          "limit": {
+                            "count": 100,
+                            "timeout": "PT30M"
+                          },
+                          "operationOptions": "FailWhenLimitsReached",
+                          "runAfter": {
+                            "Reset_deployment_seen": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "Until"
+                        },
+                        "Validate_account_ID": {
+                          "inputs": {
+                            "content": {
+                              "valid": "@and(equals(length(outputs('Account_ID_parts')), 9), equals(outputs('Account_ID_parts')[0], ''), equals(toLower(outputs('Account_ID_parts')[1]), 'subscriptions'), equals(toLower(outputs('Account_ID_parts')[2]), items('For_each_account')['scanSubscriptionId']), contains(variables('subscriptionsAttempted'), items('For_each_account')['scanSubscriptionId']), equals(toLower(outputs('Account_ID_parts')[3]), 'resourcegroups'), not(empty(outputs('Account_ID_parts')[4])), equals(toLower(outputs('Account_ID_parts')[5]), 'providers'), equals(toLower(outputs('Account_ID_parts')[6]), 'microsoft.cognitiveservices'), equals(toLower(outputs('Account_ID_parts')[7]), 'accounts'), equals(outputs('Account_ID_parts')[8], items('For_each_account')['name']), not(contains(items('For_each_account')['id'], '?')), not(contains(items('For_each_account')['id'], '#')), not(contains(items('For_each_account')['id'], '%')), not(contains(items('For_each_account')['id'], decodeUriComponent('%5C'))), not(contains(outputs('Account_ID_parts'), '.')), not(contains(outputs('Account_ID_parts'), '..')))"
+                            },
+                            "schema": {
+                              "properties": {
+                                "valid": {
+                                  "enum": [
+                                    true
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "valid"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "runAfter": {
+                            "Account_ID_parts": [
+                              "Succeeded"
+                            ]
+                          },
+                          "type": "ParseJson"
+                        }
+                      },
+                      "runAfter": {},
+                      "type": "Scope"
+                    }
+                  },
+                  "foreach": "@variables('accounts')",
+                  "operationOptions": "Sequential",
+                  "runAfter": {},
+                  "type": "Foreach"
+                }
+              },
+              "runAfter": {
+                "Catch_account_inventory": [
+                  "Succeeded",
+                  "Skipped"
+                ]
+              },
+              "type": "Scope"
+            },
+            "Inventory_errors_table": {
+              "inputs": {
+                "format": "HTML",
+                "from": "@body('Encode_errors')"
+              },
+              "runAfter": {
+                "Unknown_models_table": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Table"
+            },
+            "No_match_models": {
+              "inputs": {
+                "from": "@variables('rows')",
+                "where": "@equals(item()['assessmentStatus'], 'No condition matched')"
+              },
+              "runAfter": {
+                "Unknown_models": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Query"
+            },
+            "Old_models": {
+              "inputs": {
+                "from": "@variables('rows')",
+                "where": "@equals(item()['requiresAttention'], true)"
+              },
+              "runAfter": {
+                "Catch_assessment": [
+                  "Succeeded",
+                  "Skipped"
+                ]
+              },
+              "type": "Query"
+            },
+            "Retirement_horizon": {
+              "inputs": "@addToTime(concat(outputs('Scan_date_UTC'), 'T00:00:00Z'), parameters('retirementHorizonMonths'), 'Month', 'yyyy-MM-dd')",
+              "runAfter": {
+                "Validate_retirement_horizon_months": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose"
+            },
+            "Scan_date_UTC": {
+              "inputs": "@formatDateTime(utcNow(), 'yyyy-MM-dd')",
+              "runAfter": {},
+              "type": "Compose"
+            },
+            "Scan_summary": {
+              "inputs": {
+                "accountsDiscovered": "@length(variables('accounts'))",
+                "attentionCount": "@length(body('Old_models'))",
+                "attentionModels": "@body('Old_models')",
+                "currentModels": "@body('No_match_models')",
+                "dateBasis": "@concat('Only exact account/format/model/version catalog deprecation.inference, normalized to a UTC calendar date. Attention: today through today plus ', string(parameters('retirementHorizonMonths')), ' calendar months (inclusive), OR strictly before today. currentModels and modernCount mean a known retirement date beyond the horizon, not an unassessed model.')",
+                "deploymentsAssessed": "@length(variables('rows'))",
+                "deploymentsCollected": "@length(variables('deployments'))",
+                "errorCount": "@length(variables('errors'))",
+                "errors": "@variables('errors')",
+                "modernCount": "@length(body('No_match_models'))",
+                "noMatchCount": "@length(body('No_match_models'))",
+                "retirementHorizonCalendarMonths": "@parameters('retirementHorizonMonths')",
+                "retirementHorizonUtc": "@outputs('Retirement_horizon')",
+                "scanDateUtc": "@outputs('Scan_date_UTC')",
+                "sendNotifications": "@parameters('sendNotifications')",
+                "status": "@if(greater(length(variables('errors')), 0), 'PARTIAL / ERRORS - not an all-clear', if(greater(length(body('Old_models')), 0), 'MODELS REQUIRE ATTENTION', if(greater(length(body('Unknown_models')), 0), 'UNASSESSED RETIREMENT DATES - not an all-clear', 'COMPLETE - neither retirement condition matched')))",
+                "subscriptions": "@parameters('subscriptionId')",
+                "subscriptionsAttempted": "@variables('subscriptionsAttempted')",
+                "unknownCount": "@length(body('Unknown_models'))",
+                "unknownModels": "@body('Unknown_models')"
+              },
+              "runAfter": {
+                "No_match_models": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose"
+            },
+            "Send_only_when_approved_and_attention": {
+              "actions": {
+                "Send_consolidated_email": {
+                  "inputs": {
+                    "body": {
+                      "Body": "@outputs('Digest_preview')",
+                      "Subject": "@outputs('Digest_subject')",
+                      "To": "@parameters('recipientEmail')"
+                    },
+                    "host": {
+                      "connection": {
+                        "name": "@parameters('$connections')['office365']['connectionId']"
+                      }
+                    },
+                    "method": "post",
+                    "path": "/v2/Mail",
+                    "retryPolicy": {
+                      "type": "none"
+                    }
+                  },
+                  "runAfter": {},
+                  "type": "ApiConnection"
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "expression": "@and(equals(parameters('sendNotifications'), true), greater(length(body('Old_models')), 0))",
+              "runAfter": {
+                "Digest_preview": [
+                  "Succeeded"
+                ]
+              },
+              "type": "If"
+            },
+            "Unknown_models": {
+              "inputs": {
+                "from": "@variables('rows')",
+                "where": "@equals(item()['assessmentStatus'], 'Unassessed')"
+              },
+              "runAfter": {
+                "Old_models": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Query"
+            },
+            "Unknown_models_table": {
+              "inputs": {
+                "format": "HTML",
+                "from": "@body('Encode_unknown_rows')"
+              },
+              "runAfter": {
+                "Attention_models_table": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Table"
+            },
+            "Validate_retirement_horizon_months": {
+              "inputs": {
+                "content": {
+                  "retirementHorizonMonths": "@parameters('retirementHorizonMonths')"
+                },
+                "schema": {
+                  "properties": {
+                    "retirementHorizonMonths": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "retirementHorizonMonths"
+                  ],
+                  "type": "object"
+                }
+              },
+              "runAfter": {
+                "Scan_date_UTC": [
+                  "Succeeded"
+                ]
+              },
+              "type": "ParseJson"
+            }
+          },
+          "contentVersion": "3.3.0.0",
+          "outputs": {
+            "digestPreview": {
+              "type": "String",
+              "value": "@outputs('Digest_preview')"
+            },
+            "summary": {
+              "type": "Object",
+              "value": "@outputs('Scan_summary')"
+            }
+          },
+          "parameters": {
+            "$connections": {
+              "defaultValue": {},
+              "type": "Object"
+            },
+            "maxPages": {
+              "defaultValue": 100,
+              "type": "Int"
+            },
+            "recipientEmail": {
+              "defaultValue": "xxbulento@microsoft.com",
+              "type": "String"
+            },
+            "retirementHorizonMonths": {
+              "defaultValue": 12,
+              "type": "Int"
+            },
+            "sendNotifications": {
+              "defaultValue": true,
+              "type": "Bool"
+            },
+            "subscriptionId": {
+              "defaultValue": "[createArray(subscription().subscriptionId)]",
+              "type": "Array"
+            }
+          },
+          "triggers": {
+            "Weekly_Monday_Istanbul": {
+              "recurrence": {
+                "frequency": "Week",
+                "interval": 1,
+                "schedule": {
+                  "hours": [
+                    9
+                  ],
+                  "minutes": [
+                    0
+                  ],
+                  "weekDays": [
+                    "Monday"
+                  ]
+                },
+                "timeZone": "Turkey Standard Time"
+              },
+              "runtimeConfiguration": {
+                "concurrency": {
+                  "runs": 1
+                }
+              },
+              "type": "Recurrence"
+            }
+          }
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "office365": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', parameters('office365ConnectionName'))]",
+                "connectionName": "[parameters('office365ConnectionName')]",
+                "id": "[variables('office365ApiId')]"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "condition": "[parameters('assignReaderRole')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}-reader-{1}', take(parameters('workflowName'), 40), uniqueString(resourceGroup().id))]",
+      "subscriptionId": "[subscription().subscriptionId]",
+      "location": "[variables('normalizedLocation')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "parameters": {
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "readerRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'acdd72a7-3385-48ef-bd42-f606fba81ae7')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(subscription().id, parameters('principalId'), variables('readerRoleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[variables('readerRoleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "workflowResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+    },
+    "workflowPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+    },
+    "office365ConnectionResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/connections', parameters('office365ConnectionName'))]"
+    },
+    "postDeploymentSteps": {
+      "type": "string",
+      "value": "1) Open the Office 365 connection > Edit API connection > Authorize > Save. 2) In the Logic App designer, update the workflow parameters (subscriptionId, recipientEmail, retirementHorizonMonths, sendNotifications) and publish. 3) Grant the Logic App identity Reader on any other scanned subscriptions. 4) Enable the Logic App; the first run may start immediately."
+    }
+  }
+}
