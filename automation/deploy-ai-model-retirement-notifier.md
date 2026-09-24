@@ -2,9 +2,9 @@
 
 Deploys an Azure Logic App that checks your Azure AI Foundry and Azure OpenAI model deployments every week. It emails a report when a deployed model is retiring soon or has already retired.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fbulentozkir%2Fazurethings%2Fmain%2Fautomation%2Fdeploy-ai-model-retirement-notifier.json)
 
-Template: [deploy-ai-model-retirement-notifier.json](deploy-ai-model-retirement-notifier.json). Keep it in the same folder as this file.
+Template: [deploy-ai-model-retirement-notifier.json](deploy-ai-model-retirement-notifier.json)
 
 ## What gets deployed
 
@@ -26,12 +26,26 @@ Template: [deploy-ai-model-retirement-notifier.json](deploy-ai-model-retirement-
 
 ## Deploy
 
-1. Open [deploy-ai-model-retirement-notifier.json](deploy-ai-model-retirement-notifier.json) and select **Download raw file**.
-2. Select **Deploy to Azure** above.
-3. Select **Build your own template in the editor** > **Load file**, choose the downloaded file, then select **Save**.
-4. Choose the subscription and resource group, review the parameters, then select **Review + create**.
+1. Select **Deploy to Azure** above. The Azure portal opens **Custom deployment** with the template already loaded.
+2. Choose the subscription and resource group.
+3. Review the parameters, then select **Review + create** > **Create**.
 
-> **Note:** The button opens the Azure portal's custom deployment page. Azure can't load a template from a relative repository link, so you load the file in step 3. This works for both public and private repositories.
+> **Note:** The button deploys the template from the `main` branch of [bulentozkir/azurethings](https://github.com/bulentozkir/azurethings). The portal downloads it anonymously, so the repository must be public.
+
+### Use in another repository
+
+The button needs the template's full public URL; a relative link doesn't work. If you copy these files to another repository:
+
+1. Open the template on GitHub, select **Raw**, and copy the URL.
+2. URL-encode it:
+
+   ```powershell
+   [uri]::EscapeDataString("https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>/deploy-ai-model-retirement-notifier.json")
+   ```
+
+3. Replace the button link with `https://portal.azure.com/#create/Microsoft.Template/uri/<encoded-url>`.
+
+For a private repository, deploy manually: in the Azure portal, open **Deploy a custom template** > **Build your own template in the editor** > **Load file**, select the template, then select **Save**.
 
 ### Deployment parameters
 
