@@ -1,0 +1,15 @@
+{
+  "displayName": "Foundry projects should have a system-assigned managed identity",
+  "description": "Audit Microsoft.CognitiveServices/accounts/projects whose identity.type does not include SystemAssigned.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": { "category": "AI Governance", "version": "1.0.0", "controlIds": ["AI-GOV-116"], "source": "https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview" },
+  "parameters": { "effect": { "type": "String", "metadata": { "displayName": "Effect", "description": "Audit reports resources without a system-assigned identity." }, "allowedValues": ["Audit", "Deny"], "defaultValue": "Audit" } },
+  "policyRule": {
+    "if": { "allOf": [
+      { "field": "type", "equals": "Microsoft.CognitiveServices/accounts/projects" },
+      { "anyOf": [ { "field": "identity.type", "exists": "false" }, { "field": "identity.type", "notContains": "SystemAssigned" } ] }
+    ] },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

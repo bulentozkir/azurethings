@@ -1,0 +1,32 @@
+{
+  "displayName": "Microsoft Defender for AI services should be enabled",
+  "description": "Audit subscriptions where the Microsoft Defender for Cloud AI services plan (pricings/AI) is not on the Standard tier. Does not enable the plan or verify alert handling.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-119"],
+    "source": "https://learn.microsoft.com/azure/defender-for-cloud/ai-threat-protection",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits the Defender for AI services pricing plan." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "AuditIfNotExists reports subscriptions without the Defender for AI plan. Deny cannot implement this existence check." },
+      "allowedValues": ["AuditIfNotExists", "Disabled"],
+      "defaultValue": "AuditIfNotExists"
+    }
+  },
+  "policyRule": {
+    "if": { "field": "type", "equals": "Microsoft.Resources/subscriptions" },
+    "then": {
+      "effect": "[parameters('effect')]",
+      "details": {
+        "type": "Microsoft.Security/pricings",
+        "name": "AI",
+        "existenceCondition": { "field": "Microsoft.Security/pricings/pricingTier", "equals": "Standard" }
+      }
+    }
+  }
+}

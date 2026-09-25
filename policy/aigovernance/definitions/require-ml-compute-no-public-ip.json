@@ -1,0 +1,31 @@
+{
+  "displayName": "Azure Machine Learning computes should not have public IP addresses",
+  "description": "Audit AmlCompute clusters and compute instances where enableNodePublicIp is not false. A missing value is reported because the service default is a public IP.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-121"],
+    "source": "https://learn.microsoft.com/azure/machine-learning/how-to-secure-training-vnet",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits enableNodePublicIp on Azure ML compute; B07 checks VNet placement only." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "Audit reports compute with a public IP. Deny is available only for a separate explicit assignment." },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces/computes" },
+        { "field": "Microsoft.MachineLearningServices/workspaces/computes/computeType", "in": ["AmlCompute", "ComputeInstance"] },
+        { "field": "Microsoft.MachineLearningServices/workspaces/computes/enableNodePublicIp", "notEquals": false }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

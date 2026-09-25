@@ -1,0 +1,45 @@
+{
+  "displayName": "AI resources not covered by other log checks should have diagnostic logs enabled",
+  "description": "Audit Azure ML online endpoints and registries, Bot Service, and Video Indexer accounts without a diagnostic setting that enables at least one log category or category group. Destination is not checked. Cognitive Services, Search, and ML workspaces are covered by B28, B29, and B30.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-120"],
+    "source": "https://learn.microsoft.com/azure/azure-monitor/essentials/diagnostic-settings",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "Live built-ins for these types are DeployIfNotExists logging policies that require a destination parameter." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "AuditIfNotExists reports resources without enabled diagnostic logs. Deny cannot implement this existence check." },
+      "allowedValues": ["AuditIfNotExists", "Disabled"],
+      "defaultValue": "AuditIfNotExists"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "field": "type",
+      "in": [
+        "Microsoft.MachineLearningServices/workspaces/onlineEndpoints",
+        "Microsoft.MachineLearningServices/registries",
+        "Microsoft.BotService/botServices",
+        "Microsoft.VideoIndexer/accounts"
+      ]
+    },
+    "then": {
+      "effect": "[parameters('effect')]",
+      "details": {
+        "type": "Microsoft.Insights/diagnosticSettings",
+        "existenceCondition": {
+          "count": {
+            "field": "Microsoft.Insights/diagnosticSettings/logs[*]",
+            "where": { "field": "Microsoft.Insights/diagnosticSettings/logs[*].enabled", "equals": "true" }
+          },
+          "greater": 0
+        }
+      }
+    }
+  }
+}

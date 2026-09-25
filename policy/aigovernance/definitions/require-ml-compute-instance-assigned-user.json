@@ -1,0 +1,36 @@
+{
+  "displayName": "Azure Machine Learning compute instances should be assigned to a user",
+  "description": "Audit compute instances without personalComputeInstanceSettings.assignedUser.objectId. Instances created without an explicit assigned user may be reported; review before remediation.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-125"],
+    "source": "https://learn.microsoft.com/azure/machine-learning/how-to-create-compute-instance",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits compute instance user assignment." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "Audit reports unassigned compute instances. Deny is available only for a separate explicit assignment." },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces/computes" },
+        { "field": "Microsoft.MachineLearningServices/workspaces/computes/computeType", "equals": "ComputeInstance" },
+        {
+          "anyOf": [
+            { "field": "Microsoft.MachineLearningServices/workspaces/computes/personalComputeInstanceSettings.assignedUser.objectId", "exists": "false" },
+            { "field": "Microsoft.MachineLearningServices/workspaces/computes/personalComputeInstanceSettings.assignedUser.objectId", "equals": "" }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

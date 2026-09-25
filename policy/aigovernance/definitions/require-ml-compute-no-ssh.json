@@ -1,0 +1,45 @@
+{
+  "displayName": "Azure Machine Learning computes should have public SSH access disabled",
+  "description": "Audit AmlCompute clusters whose remoteLoginPortPublicAccess is not Disabled (NotSpecified opens SSH when no VNet is set) and compute instances whose sshSettings.sshPublicAccess is not Disabled.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-122"],
+    "source": "https://learn.microsoft.com/azure/templates/microsoft.machinelearningservices/workspaces/computes",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits SSH access on Azure ML compute." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "Audit reports compute with public SSH access. Deny is available only for a separate explicit assignment." },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces/computes" },
+        {
+          "anyOf": [
+            {
+              "allOf": [
+                { "field": "Microsoft.MachineLearningServices/workspaces/computes/computeType", "equals": "AmlCompute" },
+                { "field": "Microsoft.MachineLearningServices/workspaces/computes/remoteLoginPortPublicAccess", "notEquals": "Disabled" }
+              ]
+            },
+            {
+              "allOf": [
+                { "field": "Microsoft.MachineLearningServices/workspaces/computes/computeType", "equals": "ComputeInstance" },
+                { "field": "Microsoft.MachineLearningServices/workspaces/computes/sshSettings.sshPublicAccess", "notEquals": "Disabled" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

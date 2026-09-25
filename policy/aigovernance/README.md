@@ -1,6 +1,6 @@
 # Microsoft Foundry and Azure ML: Audit Controls
 
-The current profile is **AIPlatformAudit 5.4.0**, displayed as **Microsoft Foundry, Azure ML and AI Services - Audit Controls**: **34 distinct policies**. That is five Foundry custom checks, three other custom checks (system-assigned identity, model deployment content filter, ML endpoint Entra auth), and 26 simple built-ins (nine Azure ML, 17 for other AI services and model deployments). By default 28 use `Audit` and six use `AuditIfNotExists`; each policy's effect can be overridden at assignment (see [Assignment Inputs](#assignment-inputs)). Policies that need list inputs are excluded. No tags, region/IP allowlists, supporting-service controls, or remediation are included. The previous broad baseline and catalogue below are historical reference material.
+The current profile is **AIPlatformAudit 6.2.0**: **45 distinct policies** (25 custom, 20 built-in; 38 Audit and 7 AuditIfNotExists defaults), with 11 per-type system-assigned identity checks. Earlier summary (6.1.0): **37 distinct policies** (15 custom, 22 built-in). See [Additional Checks](#additional-checks-610) for the seven added in 6.1.0. Earlier summary (6.0.0): **30 distinct policies****. That is five Foundry custom checks, three other custom checks (system-assigned identity, model deployment content filter, ML endpoint Entra auth), and 22 simple built-ins (eight Azure ML, 14 for other AI services and model deployments). No customer-managed key policies. By default 25 use `Audit` and five use `AuditIfNotExists`; each policy's effect can be overridden at assignment (see [Assignment Inputs](#assignment-inputs)). Policies that need list inputs are excluded. No tags, region/IP allowlists, supporting-service controls, or remediation are included. The previous broad baseline and catalogue below are historical reference material.
 
 ## Current Checks
 
@@ -15,17 +15,35 @@ The current profile is **AIPlatformAudit 5.4.0**, displayed as **Microsoft Found
 
 Checks 1, 2, 3, and 5 target only `Microsoft.CognitiveServices/accounts` with `kind=AIServices` and `allowProjectManagement=true`; OpenAI-only accounts, other Cognitive Services kinds, Azure AI Search, and ML hubs are not assessed. Check 6 targets `Microsoft.CognitiveServices/accounts/projects`, which only exist under Foundry accounts. Integration checks inspect connections beneath the evaluated account or project, not unrelated resources in its resource group. Presence does not prove target existence, RBAC, secret access, telemetry delivery, or runtime use. Private endpoint presence does not prove DNS or traffic reachability.
 
-**Assignment boundary:** the initiative can be assigned at any scope; the five Foundry checks ignore non-Foundry resources. Every assignment input is optional. No assignment is created by the script.
+**Assignment boundary:** definitions are published at the chosen management group (`ManagementGroupId`, default tenant root), so the initiative can be assigned to that management group or any child management group, subscription, or resource group, once per scope or once at a parent to cover all children. `SubscriptionId` only selects sign-in and alias discovery; it does not limit where the initiative can be assigned. Each checked resource type ignores other types. Every assignment input is optional. No assignment is created by the script.
 
 ## System-Assigned Managed Identity Check
 
-[System-assigned identity](definitions/require-ai-system-assigned-identity.json) (`AI_SystemAssignedIdentity`, Audit by default) reports any AI resource whose `identity.type` does not include `SystemAssigned`. That covers user-assigned-only, `None`, and missing identities. No built-in requires a system-assigned identity: B11 accepts user-assigned identities and covers only Cognitive Services.
+One policy per AI resource type (Audit by default, Deny optional) reports resources whose `identity.type` does not include `SystemAssigned` (user-assigned-only, `None`, or missing). B11 and B12 were removed in 6.2.0; these checks are the only identity controls. The earlier combined [system-assigned identity](definitions/require-ai-system-assigned-identity.json) definition is retained but no longer referenced.
+
+| Ref | Resource type |
+| --- | --- |
+| SAMI_CognitiveAccounts | [Cognitive Services accounts](definitions/require-sami-cognitive-accounts.json) (Foundry, Azure OpenAI, all kinds) |
+| SAMI_FoundryProjects | [Foundry projects](definitions/require-sami-foundry-projects.json) |
+| SAMI_MLWorkspaces | [Azure ML workspaces and hubs](definitions/require-sami-ml-workspaces.json) |
+| SAMI_MLRegistries | [Azure ML registries](definitions/require-sami-ml-registries.json) |
+| SAMI_MLOnlineEndpoints | [Azure ML online endpoints](definitions/require-sami-ml-online-endpoints.json) |
+| SAMI_MLBatchEndpoints | [Azure ML batch endpoints](definitions/require-sami-ml-batch-endpoints.json) |
+| SAMI_MLComputes | [Azure ML clusters and compute instances](definitions/require-sami-ml-computes.json) |
+| SAMI_Search | [Azure AI Search](definitions/require-sami-search.json) |
+| SAMI_HealthBot | [Health Bot](definitions/require-sami-health-bot.json) |
+| SAMI_Deid | [De-identification services](definitions/require-sami-deid.json) |
+| SAMI_VideoIndexer | [Video Indexer](definitions/require-sami-video-indexer.json) |
+
+Bot Service has no ARM managed identity and is not assessed.
+
+Older note:
 
 | Assessed | Not assessed |
 | --- | --- |
 | Cognitive Services accounts of every kind (Foundry, Azure OpenAI, Speech, Vision, Language, and so on); Foundry projects; Azure ML workspaces (including hubs and projects), registries, online and batch endpoints, AmlCompute clusters, and compute instances; Azure AI Search; Health Bot; de-identification services; Video Indexer | Bot Service (it has no ARM managed identity, only `msaAppType` UserAssignedMSI); attached ML compute (Kubernetes, VMs, Databricks, and similar); model deployments and connections, which have no identity |
 
-A resource can use both identities, and B12 (user-assigned identity on ML workspaces) can pass on the same workspace. Having an identity does not prove it has any role assignments or that the service uses it.
+A resource can use both identities. Having an identity does not prove it has any role assignments or that the service uses it.
 
 ## Model Deployment Checks
 
@@ -45,8 +63,8 @@ Simple built-ins only: no assignment inputs, audit effects, not preview or depre
 | B29 | Resource logs in Azure Machine Learning Workspaces should be enabled | AuditIfNotExists | `requiredRetentionDays` fixed to `"0"`, so logging is checked without imposing a retention period. |
 | B10 | Azure Machine Learning Computes should have local authentication methods disabled | Audit | Compute resources, not online endpoints. |
 | B07 | Azure Machine Learning Computes should be in a virtual network | Audit | Review how managed-network compute is reported before treating findings as gaps. |
-| B16 | Azure Machine Learning workspaces should be encrypted with a customer-managed key | Audit | Flags hub/default workspaces without CMK encryption; Foundry `project` workspaces are skipped by the built-in. |
-| B12 | Azure Machine Learning workspaces should use user-assigned managed identity | Audit | Flags workspaces without a primary user-assigned identity. |
+| B16 | Azure Machine Learning workspaces should be encrypted with a customer-managed key | Removed | Removed in 6.0.0: customer-managed keys will never be used. |
+| B12 | Azure Machine Learning workspaces should use user-assigned managed identity | Removed | Removed in 6.2.0: system-assigned identity checks only. |
 | B32 | Azure Machine Learning compute instances should be recreated to get the latest software updates | Audit | Compute instances not on the latest OS image. Its effect parameter is named `effects`. |
 | B35 | Azure Machine Learning Compute Instance should have idle shutdown | Audit | Compute instances without an idle-shutdown setting. |
 | ML_EndpointEntraAuth | [Online endpoints use Entra ID auth](definitions/require-ml-endpoint-entra-auth.json) (custom) | Audit | Reports managed online endpoints whose `authMode` is not `AADToken`; key and Azure ML token (`AMLToken`) endpoints are flagged. Batch and serverless endpoints are not assessed. |
@@ -62,17 +80,17 @@ Simple built-ins (effect-only, audit, not preview or deprecated) for Cognitive S
 | B01 | Azure AI Services resources should have key access disabled (disable local authentication) | Audit | Cognitive Services, Search |
 | B04 | Azure AI Services resources should use Azure Private Link | Audit | Cognitive Services, Search. Overlaps the Foundry private-endpoint check on Foundry accounts. |
 | B05 | Azure AI Services resources should restrict network access | Audit | Cognitive Services, Search. Default-deny or IP rules; selected-network access passes. |
-| B11 | Cognitive Services accounts should use a managed identity | Audit | Cognitive Services |
+| B11 | Cognitive Services accounts should use a managed identity | Removed | Removed in 6.2.0: replaced by SAMI_CognitiveAccounts. |
 | B28 | Diagnostic logs in Azure AI services resources should be enabled | AuditIfNotExists | Cognitive Services, Search |
 | B17 | Cognitive Services accounts should use customer owned storage | Audit | Cognitive Services kinds that support it |
-| B14 | Azure AI Search services should use customer-managed keys to encrypt data at rest | AuditIfNotExists | Search |
+| B14 | Azure AI Search services should use customer-managed keys to encrypt data at rest | Removed | Removed in 6.0.0: customer-managed keys will never be used. |
 | B30 | Resource logs in Search services should be enabled | AuditIfNotExists | Search. `requiredRetentionDays` fixed to `"0"`, like B29. |
 | B33 | Azure AI Search service should use a SKU that supports private link | Audit | Search |
 | B39 | BotService resources should use private link | Audit | Bot Service |
 | B70 | Bot Service should have local authentication methods disabled | Audit | Bot Service |
 | B71 | Bot Service endpoint should be a valid HTTPS URI | Audit | Bot Service |
-| B72 | Bot Service should be encrypted with a customer-managed key | Audit | Bot Service |
-| B73 | Azure Health Bots should use customer-managed keys to encrypt data at rest | Audit | Health Bot |
+| B72 | Bot Service should be encrypted with a customer-managed key | Removed | Removed in 6.0.0: no customer-managed keys. |
+| B73 | Azure Health Bots should use customer-managed keys to encrypt data at rest | Removed | Removed in 6.0.0: no customer-managed keys. |
 | B74 | Azure Health Bots should use Azure RBAC as their access control method | Audit | Health Bot |
 | B38 | Azure Health Data Services de-identification service should use private link | Audit | De-identification |
 
@@ -80,32 +98,33 @@ Excluded: public-network-disable checks for Search (B02), Bot Service (public ac
 
 ## Assignment Inputs
 
-The only inputs are **34 optional effect overrides**, one per policy, named `<reference>_effect` and labelled `Effect: <policy name> (<reference>)`. Each defaults to its audit effect and offers every effect the underlying policy supports:
+The only inputs are **45 optional effect overrides**, one per policy, named `<reference>_effect` and labelled `Effect: <policy name> (<reference>)`. Each defaults to its audit effect and offers every effect the underlying policy supports:
 
 | Choices | Policies |
 | --- | --- |
-| Audit, Deny, Disabled | B01, B05, B06, B10, B11, B12, B16, B17, B19, B33, B35, B70, B71, B72 |
-| Audit, Deny | Foundry_TrustedServices, Foundry_PrivateEndpoint, AI_FoundryVnetInjection, AI_SystemAssignedIdentity, AI_DeploymentContentFilter, ML_EndpointEntraAuth |
-| Audit, Disabled | B04, B07, B32, B36, B38, B39, B73, B74 |
-| AuditIfNotExists, Disabled | Foundry_KeyVault, Foundry_AppInsights, B14, B28, B29, B30 |
+| Audit, Deny, Disabled | B01, B05, B06, B10, B17, B19, B33, B35, B70, B71 |
+| Audit, Deny | Foundry_TrustedServices, Foundry_PrivateEndpoint, AI_FoundryVnetInjection, SAMI_* (11), AI_DeploymentContentFilter, ML_EndpointEntraAuth, ML_ComputeNoPublicIp, ML_ComputeNoSsh, AI_DeploymentAutoUpgrade, ML_WorkspaceHbi, ML_ComputeInstanceAssignedUser |
+| Audit, Disabled | B04, B07, B32, B36, B38, B39, B74 |
+| AuditIfNotExists, Disabled | Foundry_KeyVault, Foundry_AppInsights, AI_DefenderForAI, AI_DiagnosticLogs, B28, B29, B30 |
 
 Leaving every field unchanged gives an audit-only assignment. Choosing `Deny` blocks non-compliant creates and updates; test it on a narrow scope first. Other settings (B06 `isolationMode`, B19 `denyPreviewModels`/`onlyAllowDirectFromAzure`, B29/B30 `requiredRetentionDays`) stay fixed and hidden. B18 (model approval) was removed in 5.1.0 because it needs list inputs, and the generator rejects any initiative parameter that is not an effect override.
 
 ## Publish And Validate
 
-Use PowerShell 7 with Az.Accounts and permission to publish definitions at the tenant root management group. The subscription selects authentication and alias discovery, not the definition scope.
+Use PowerShell 7 with Az.Accounts and Resource Policy Contributor (or Owner) on the target management group. Azure public cloud (`AzureCloud`) only; the deployer refuses sovereign clouds. `ManagementGroupId` sets where definitions and the initiative are created (default: tenant root); the initiative can then be assigned at that management group or anything below it. The subscription selects authentication and alias discovery, not the definition scope.
 
 ```powershell
 $deploymentParameters = @{
 	TenantId = '<customer-tenant-guid>'
 	SubscriptionId = '<customer-subscription-guid>'
+	ManagementGroupId = '<top-management-group-id>'  # optional; omit for tenant root
 }
 & ./policy/aigovernance/Test-AiGovernance.ps1
 & ./policy/aigovernance/Deploy-AiGovernance.ps1 @deploymentParameters -WhatIf
 & ./policy/aigovernance/Deploy-AiGovernance.ps1 @deploymentParameters
 ```
 
-[Deploy-AiGovernance.ps1](Deploy-AiGovernance.ps1) keeps the resource name `ai-governance-audit`, with display name **Microsoft Foundry, Azure ML and AI Services - Audit Controls**. It publishes only the five custom definitions used here and reuses 24 built-ins listed by `Get-ExpectedBuiltIns`. `Get-FoundryBindings` and the manifest's explicit `includedReferences` define the complete selection. `ExcludeBuiltInReference` is rejected because it would break the six-control contract. Older standalone files are retained but neither published nor referenced. Audit effects are fixed; the connection checks cannot support Deny because they inspect related-resource existence.
+[Deploy-AiGovernance.ps1](Deploy-AiGovernance.ps1) keeps the resource name `ai-governance-audit`, with display name **Microsoft Foundry, Azure ML and AI Services - Audit Controls**. It publishes only the 25 custom definitions used here and reuses 20 built-ins listed by `Get-ExpectedBuiltIns`. `Get-FoundryBindings` and the manifest's explicit `includedReferences` define the complete selection. `ExcludeBuiltInReference` is rejected because it would break the fixed selection. Older standalone files are retained but neither published nor referenced. Audit effects are fixed; the connection checks cannot support Deny because they inspect related-resource existence.
 
 The live catalogue review on 2026-09-24 found no suitable trusted-service, injection, or connection-presence built-ins among 2,862 definitions. The custom predicates use verified Cognitive Services aliases. Tests cover scope guards, absent/empty/wrong-category connections, fixed effects, model-input bindings, and obsolete-parameter migration. Offline fixtures do not simulate Azure's child enumeration, data-plane enforcement, or runtime connectivity.
 
@@ -129,6 +148,24 @@ The live catalogue review on 2026-09-24 found no suitable trusted-service, injec
 
 **Updated 2026-09-24 to 5.4.0:** added B30 (Search resource logs), B19 (no preview model deployments), and custom checks AI-GOV-117 (deployment content filter) and AI-GOV-118 (ML online endpoint Entra ID auth). The App Insights check (AI-GOV-112) moved from the Foundry account to each Foundry project. The initiative now has 34 references and 34 effect overrides (28 Audit and 6 AuditIfNotExists defaults).
 
+**Recreated 2026-09-25 as 6.0.0:** customer-managed key policies B14, B16, B72, and B73 removed (CMK will never be used). Deleted and recreated so no stale effect fields remain. 30 references, 30 effect overrides (25 Audit, 5 AuditIfNotExists).
+
+**Updated 2026-09-25 to 6.1.0:** seven custom audits added in place (AI-GOV-119 to AI-GOV-125). 37 references, 37 effect overrides (30 Audit, 7 AuditIfNotExists).
+
+**Recreated 2026-09-25 as 6.2.0:** the combined system-assigned identity check was split into 11 per-resource-type policies, and B11/B12 were removed. 45 references, 45 effect overrides (38 Audit, 7 AuditIfNotExists).
+
+## Additional Checks (6.1.0)
+
+| Ref | Check | Default | Note |
+| --- | --- | --- | --- |
+| AI_DefenderForAI | [Defender for AI enabled](definitions/require-defender-for-ai.json) | AuditIfNotExists | Subscription `pricings/AI` must be Standard. |
+| AI_DiagnosticLogs | [Diagnostic logs](definitions/require-ai-diagnostic-logs.json) | AuditIfNotExists | ML online endpoints and registries, Bot Service, Video Indexer: at least one enabled log. Destination not checked. De-identification is not included (diagnostic support unverified). |
+| ML_ComputeNoPublicIp | [No public IP](definitions/require-ml-compute-no-public-ip.json) | Audit | AmlCompute and compute instances; unset is reported. |
+| ML_ComputeNoSsh | [No public SSH](definitions/require-ml-compute-no-ssh.json) | Audit | Clusters must be `Disabled` (NotSpecified is reported); instances `sshPublicAccess=Disabled`. |
+| AI_DeploymentAutoUpgrade | [Auto-upgrade](definitions/require-ai-deployment-auto-upgrade.json) | Audit | Reports `versionUpgradeOption=NoAutoUpgrade`. |
+| ML_WorkspaceHbi | [HBI workspace](definitions/require-ml-workspace-hbi.json) | Audit | Workspaces and hubs; projects skipped. HBI can only be set at creation. |
+| ML_ComputeInstanceAssignedUser | [Assigned user](definitions/require-ml-compute-instance-assigned-user.json) | Audit | Instances without an assigned user object ID; may report instances created without explicit assignment. |
+
 ## Current Control Evidence
 
 | ID | Priority | Requirement | Evidence boundary | Implementation | Sources |
@@ -137,16 +174,25 @@ The live catalogue review on 2026-09-24 found no suitable trusted-service, injec
 | AI-GOV-111 | P0 | Require account-level Key Vault integration. | A nonempty AzureKeyVault connection target, not CMK or an unrelated vault. | L: require-foundry-key-vault-connection | D [FoundryConnections] |
 | AI-GOV-112 | P0 | Require project-level Application Insights integration. | A nonempty AppInsights connection target on each Foundry project, not an account-level connection, diagnostic settings, or proof of telemetry delivery. | L: require-foundry-app-insights-connection | D [FoundryConnections] |
 | AI-GOV-113 | P0 | Require an approved private endpoint on Foundry accounts only. | At least one Approved connection; pending/rejected do not count. Not DNS, routing, or disabled public access. | L: require-foundry-private-endpoint | D [CognitiveNetwork] |
-| AI-GOV-114 | P0 | Audit simple Bot Service hardening. | Local auth disabled, HTTPS messaging endpoint, CMK encryption. Bot private link is B39. | B70; B71; B72; Audit | D [Baseline] |
-| AI-GOV-115 | P0 | Audit simple Health Bot hardening. | CMK encryption and Azure RBAC access control. | B73; B74; Audit | D [Baseline] |
-| AI-GOV-116 | P0 | Require a system-assigned managed identity on AI resources. | identity.type includes SystemAssigned; user-assigned-only, None, or missing is reported. Stricter than B11. | L: require-ai-system-assigned-identity | D [ManagedIdentity] |
+| AI-GOV-114 | P0 | Audit simple Bot Service hardening. | Local auth disabled and HTTPS messaging endpoint. B72 (CMK) removed in 6.0.0. Bot private link is B39. | B70; B71; Audit | D [Baseline] |
+| AI-GOV-115 | P0 | Audit simple Health Bot hardening. | Azure RBAC access control. B73 (CMK) removed in 6.0.0. | B74; Audit | D [Baseline] |
+| AI-GOV-116 | P0 | Require a system-assigned managed identity on AI resources, one policy per type. | identity.type includes SystemAssigned; user-assigned-only, None, or missing is reported. | L: require-ai-system-assigned-identity (retired); require-sami-cognitive-accounts; require-sami-foundry-projects; require-sami-ml-workspaces; require-sami-ml-registries; require-sami-ml-online-endpoints; require-sami-ml-batch-endpoints; require-sami-ml-computes; require-sami-search; require-sami-health-bot; require-sami-deid; require-sami-video-indexer | D [ManagedIdentity] |
 | AI-GOV-117 | P0 | Require a content filter on model deployments. | raiPolicyName missing, empty, or Microsoft.Nil is reported; custom filter settings are not inspected. | L: require-ai-deployment-content-filter | D [ContentFilters] |
 | AI-GOV-118 | P0 | Require Entra ID authentication on ML online endpoints. | authMode must be AADToken; Key and AMLToken are reported. Batch and serverless endpoints are not assessed. | L: require-ml-endpoint-entra-auth | D [MLEndpointAuth] |
+| AI-GOV-119 | P0 | Require Defender for AI services. | Subscription AI pricing plan on Standard; alert handling not verified. | L: require-defender-for-ai | D [DefenderAI] |
+| AI-GOV-120 | P0 | Require diagnostic logs on remaining AI types. | ML online endpoints/registries, Bot Service, Video Indexer need an enabled log; destination not checked. | L: require-ai-diagnostic-logs | D [DiagSettings] |
+| AI-GOV-121 | P0 | Prohibit public IPs on ML compute. | enableNodePublicIp must be false on clusters and instances. | L: require-ml-compute-no-public-ip | D [MLCompute] |
+| AI-GOV-122 | P0 | Prohibit public SSH on ML compute. | Cluster remoteLoginPortPublicAccess and instance sshPublicAccess must be Disabled. | L: require-ml-compute-no-ssh | D [MLCompute] |
+| AI-GOV-123 | P1 | Require automatic model version upgrade. | NoAutoUpgrade deployments are reported. | L: require-ai-deployment-auto-upgrade | D [Models] |
+| AI-GOV-124 | P1 | Require HBI mode on ML workspaces. | hbiWorkspace true on workspaces and hubs; projects skipped. | L: require-ml-workspace-hbi | D [ML] |
+| AI-GOV-125 | P1 | Require assigned users on compute instances. | personalComputeInstanceSettings.assignedUser.objectId must be set. | L: require-ml-compute-instance-assigned-user | D [MLCompute] |
 
 [FoundryConnections]: https://learn.microsoft.com/azure/templates/microsoft.cognitiveservices/accounts/connections
 [ManagedIdentity]: https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/overview
 [ContentFilters]: https://learn.microsoft.com/azure/ai-foundry/openai/how-to/content-filters
 [MLEndpointAuth]: https://learn.microsoft.com/azure/machine-learning/how-to-authenticate-online-endpoint
+[DefenderAI]: https://learn.microsoft.com/azure/defender-for-cloud/ai-threat-protection
+[DiagSettings]: https://learn.microsoft.com/azure/azure-monitor/essentials/diagnostic-settings
 
 <details>
 <summary>Historical CoreSecurity 2.2.0 guide, superseded by the six controls above</summary>

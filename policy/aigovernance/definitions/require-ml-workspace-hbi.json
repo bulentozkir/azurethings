@@ -1,0 +1,31 @@
+{
+  "displayName": "Azure Machine Learning workspaces should use high business impact mode",
+  "description": "Audit Azure ML workspaces (including Foundry hubs) where hbiWorkspace is not true. HBI limits diagnostic data collected by Microsoft and can only be set at creation. Project workspaces are skipped because they inherit from their hub.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-124"],
+    "source": "https://learn.microsoft.com/azure/machine-learning/concept-data-encryption",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits hbiWorkspace." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "Audit reports workspaces without HBI mode. Deny is available only for a separate explicit assignment." },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.MachineLearningServices/workspaces" },
+        { "field": "kind", "notEquals": "Project" },
+        { "field": "Microsoft.MachineLearningServices/workspaces/hbiWorkspace", "notEquals": true }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "displayName": "AI model deployments should upgrade model versions automatically",
+  "description": "Audit Cognitive Services model deployments (Foundry, Azure OpenAI) with versionUpgradeOption set to NoAutoUpgrade, which fail when the pinned model version retires.",
+  "policyType": "Custom",
+  "mode": "All",
+  "metadata": {
+    "category": "AI Governance",
+    "version": "1.0.0",
+    "controlIds": ["AI-GOV-123"],
+    "source": "https://learn.microsoft.com/azure/ai-foundry/openai/how-to/working-with-models",
+    "builtInReview": { "reviewedOn": "2026-09-25", "gap": "No live built-in audits model deployment versionUpgradeOption." }
+  },
+  "parameters": {
+    "effect": {
+      "type": "String",
+      "metadata": { "displayName": "Effect", "description": "Audit reports deployments without automatic version upgrade. Deny is available only for a separate explicit assignment." },
+      "allowedValues": ["Audit", "Deny"],
+      "defaultValue": "Audit"
+    }
+  },
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.CognitiveServices/accounts/deployments" },
+        { "field": "Microsoft.CognitiveServices/accounts/deployments/versionUpgradeOption", "equals": "NoAutoUpgrade" }
+      ]
+    },
+    "then": { "effect": "[parameters('effect')]" }
+  }
+}

@@ -6,10 +6,16 @@
   "assignmentProfile": {
     "mode": "AuditOnly",
     "baseline": "AIPlatformAudit",
-    "description": "Custom checks plus 26 simple built-ins; the only assignment parameters are optional per-policy effect overrides that default to Audit/AuditIfNotExists: Azure ML (B06, B07, B10, B12, B16, B29, B32, B35, B36), other AI services (B01, B04, B05, B11, B14, B17, B28, B30, B33, B38, B39, B70-B74), and model deployments (B19). B06, B19, B29, and B30 use fixed hidden settings. Policies needing parameter lists (such as B18 model approval) and public-network-disable checks stay excluded. Other catalogue entries are reference material.",
+    "description": "Custom checks plus 22 simple built-ins; the only assignment parameters are optional per-policy effect overrides that default to Audit/AuditIfNotExists: Azure ML (B06, B07, B10, B12, B29, B32, B35, B36), other AI services (B01, B04, B05, B11, B17, B28, B30, B33, B38, B39, B70, B71, B74), and model deployments (B19). B06, B19, B29, and B30 use fixed hidden settings. Customer-managed key policies, policies needing parameter lists (such as B18 model approval), and public-network-disable checks stay excluded. Other catalogue entries are reference material.",
     "permittedEffects": ["Audit", "AuditIfNotExists"],
-    "includedReferences": ["B06", "B07", "B10", "B12", "B16", "B29", "B32", "B35", "B36", "B01", "B04", "B05", "B11", "B14", "B17", "B28", "B33", "B38", "B39", "B70", "B71", "B72", "B73", "B74", "B30", "B19"],
+    "includedReferences": ["B06", "B07", "B10", "B29", "B32", "B35", "B36", "B01", "B04", "B05", "B17", "B28", "B33", "B38", "B39", "B70", "B71", "B74", "B30", "B19"],
     "excludedReferences": {
+      "B11": "Removed 2026-09-25: the custom system-assigned identity check covers all AI resources.",
+      "B12": "Removed 2026-09-25: the custom system-assigned identity check covers all AI resources; user-assigned identity is not required.",
+      "B14": "Removed 2026-09-25: customer-managed keys will never be used.",
+      "B16": "Removed 2026-09-25: customer-managed keys will never be used.",
+      "B72": "Removed 2026-09-25: customer-managed keys will never be used.",
+      "B73": "Removed 2026-09-25: customer-managed keys will never be used.",
       "B18": "Removed 2026-09-24 at the user's request to avoid policies that ask for complex parameters: it requires approved publisher and model asset lists.",
       "B02": "Private-only Search overlay conflicts with the standard approved-IP public-access baseline.",
       "B03": "Private-only ML overlay conflicts with the standard approved-IP public-access baseline.",

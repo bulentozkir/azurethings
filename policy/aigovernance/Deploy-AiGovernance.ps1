@@ -9,6 +9,9 @@ param(
     [Parameter(Mandatory)]
     [guid]$SubscriptionId,
 
+    [ValidatePattern('^[A-Za-z0-9._()-]{1,90}$')]
+    [string]$ManagementGroupId,
+
     [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9-]{0,19}$')]
     [string]$DefinitionPrefix = 'ai-gov',
 
@@ -27,6 +30,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if (-not $ManagementGroupId) { $ManagementGroupId = $TenantId.ToString() }
 
 function Get-AuditSelection {
     param([System.Collections.IDictionary]$Manifest)
@@ -56,8 +60,8 @@ function Get-AuditSelection {
 
 function Get-ExpectedBuiltIns {
     @(
-        'B06', 'B07', 'B10', 'B12', 'B16', 'B29', 'B32', 'B35', 'B36',
-        'B01', 'B04', 'B05', 'B11', 'B14', 'B17', 'B28', 'B33', 'B38', 'B39', 'B70', 'B71', 'B72', 'B73', 'B74', 'B30', 'B19'
+        'B06', 'B07', 'B10', 'B29', 'B32', 'B35', 'B36',
+        'B01', 'B04', 'B05', 'B17', 'B28', 'B33', 'B38', 'B39', 'B70', 'B71', 'B74', 'B30', 'B19'
     )
 }
 
@@ -68,9 +72,26 @@ function Get-FoundryBindings {
         @{ file = 'require-foundry-vnet-injection'; reference = 'AI_FoundryVnetInjection'; effect = 'Audit' },
         @{ file = 'require-foundry-key-vault-connection'; reference = 'Foundry_KeyVault'; effect = 'AuditIfNotExists' },
         @{ file = 'require-foundry-app-insights-connection'; reference = 'Foundry_AppInsights'; effect = 'AuditIfNotExists' },
-        @{ file = 'require-ai-system-assigned-identity'; reference = 'AI_SystemAssignedIdentity'; effect = 'Audit' },
+        @{ file = 'require-sami-cognitive-accounts'; reference = 'SAMI_CognitiveAccounts'; effect = 'Audit' },
+        @{ file = 'require-sami-foundry-projects'; reference = 'SAMI_FoundryProjects'; effect = 'Audit' },
+        @{ file = 'require-sami-ml-workspaces'; reference = 'SAMI_MLWorkspaces'; effect = 'Audit' },
+        @{ file = 'require-sami-ml-registries'; reference = 'SAMI_MLRegistries'; effect = 'Audit' },
+        @{ file = 'require-sami-ml-online-endpoints'; reference = 'SAMI_MLOnlineEndpoints'; effect = 'Audit' },
+        @{ file = 'require-sami-ml-batch-endpoints'; reference = 'SAMI_MLBatchEndpoints'; effect = 'Audit' },
+        @{ file = 'require-sami-ml-computes'; reference = 'SAMI_MLComputes'; effect = 'Audit' },
+        @{ file = 'require-sami-search'; reference = 'SAMI_Search'; effect = 'Audit' },
+        @{ file = 'require-sami-health-bot'; reference = 'SAMI_HealthBot'; effect = 'Audit' },
+        @{ file = 'require-sami-deid'; reference = 'SAMI_Deid'; effect = 'Audit' },
+        @{ file = 'require-sami-video-indexer'; reference = 'SAMI_VideoIndexer'; effect = 'Audit' },
         @{ file = 'require-ai-deployment-content-filter'; reference = 'AI_DeploymentContentFilter'; effect = 'Audit' },
-        @{ file = 'require-ml-endpoint-entra-auth'; reference = 'ML_EndpointEntraAuth'; effect = 'Audit' }
+        @{ file = 'require-ml-endpoint-entra-auth'; reference = 'ML_EndpointEntraAuth'; effect = 'Audit' },
+        @{ file = 'require-defender-for-ai'; reference = 'AI_DefenderForAI'; effect = 'AuditIfNotExists' },
+        @{ file = 'require-ai-diagnostic-logs'; reference = 'AI_DiagnosticLogs'; effect = 'AuditIfNotExists' },
+        @{ file = 'require-ml-compute-no-public-ip'; reference = 'ML_ComputeNoPublicIp'; effect = 'Audit' },
+        @{ file = 'require-ml-compute-no-ssh'; reference = 'ML_ComputeNoSsh'; effect = 'Audit' },
+        @{ file = 'require-ai-deployment-auto-upgrade'; reference = 'AI_DeploymentAutoUpgrade'; effect = 'Audit' },
+        @{ file = 'require-ml-workspace-hbi'; reference = 'ML_WorkspaceHbi'; effect = 'Audit' },
+        @{ file = 'require-ml-compute-instance-assigned-user'; reference = 'ML_ComputeInstanceAssignedUser'; effect = 'Audit' }
     )
 }
 
@@ -278,11 +299,11 @@ function New-AuditInitiative {
     }
     return [ordered]@{
         displayName = $Name
-        description = 'Audit by default; every effect can be overridden at assignment. Foundry: trusted services, private endpoint, VNet injection, Key Vault connection, project App Insights. Model deployments: content filter, no preview models. Azure ML: private link, managed network, logs, CMK, identity, compute hardening, Entra endpoint auth. AI services, Search, Bot, Health Bot, de-identification: private link, local auth, identity, network, logs, CMK, storage, HTTPS, RBAC. All AI types: system-assigned identity.'
+        description = 'Audit by default; effects overridable at assignment. Foundry: trusted services, private endpoint, VNet injection, Key Vault, project App Insights. Deployments: content filter, no preview models, auto-upgrade. Azure ML: private link, managed network, logs, identity, HBI, compute hardening, Entra endpoint auth. AI services, Search, Bot, Health Bot, de-id: private link, local auth, network, logs, storage, HTTPS, RBAC. Defender for AI. System-assigned identity on all AI types.'
         policyType = 'Custom'
         metadata = @{
             category = 'AI Governance'
-            version = '5.4.0'
+            version = '6.2.0'
             managedBy = 'azurethings-ai-governance'
             defaultEffectsAuditOnly = $true
             effectOverrides = 'PerPolicyAtAssignment'
@@ -373,11 +394,12 @@ foreach ($binding in Get-FoundryBindings) {
     $customDefinitions[$binding.file] = $definition
 }
 $context = Get-AzContext -ErrorAction SilentlyContinue
-if ($null -eq $context -or $context.Tenant.Id -ne $TenantId.ToString() -or $context.Subscription.Id -ne $SubscriptionId.ToString()) {
+if ($null -eq $context -or $context.Environment.Name -ne 'AzureCloud' -or $context.Tenant.Id -ne $TenantId.ToString() -or $context.Subscription.Id -ne $SubscriptionId.ToString()) {
     if ($SkipLogin) {
-        throw 'The active Az context does not match TenantId and SubscriptionId. Sign in to the target or omit SkipLogin.'
+        throw 'The active Az context does not match AzureCloud, TenantId and SubscriptionId. Sign in to the target or omit SkipLogin.'
     }
     $loginParameters = @{
+        Environment = 'AzureCloud'
         Tenant = $TenantId.ToString()
         Subscription = $SubscriptionId.ToString()
         Scope = 'Process'
@@ -389,21 +411,18 @@ if ($null -eq $context -or $context.Tenant.Id -ne $TenantId.ToString() -or $cont
     $null = Connect-AzAccount @loginParameters
     $context = Get-AzContext -ErrorAction Stop
 }
-if ($null -eq $context -or $context.Tenant.Id -ne $TenantId.ToString() -or $context.Subscription.Id -ne $SubscriptionId.ToString()) {
-    throw 'Azure authentication did not select the requested tenant and subscription.'
+if ($null -eq $context -or $context.Environment.Name -ne 'AzureCloud' -or $context.Tenant.Id -ne $TenantId.ToString() -or $context.Subscription.Id -ne $SubscriptionId.ToString()) {
+    throw 'Azure authentication did not select Azure public cloud and the requested tenant and subscription.'
 }
 
 Write-Host "Target verified: tenant $TenantId; subscription $SubscriptionId."
 $subscriptionScope = "/subscriptions/$SubscriptionId"
-$scope = "/providers/Microsoft.Management/managementGroups/$TenantId"
-$rootGroup = Invoke-PolicyRequest -Method GET -Path "${scope}?api-version=2020-05-01"
-if ($rootGroup.id -ne $scope -or $rootGroup.properties.tenantId -ne $TenantId.ToString() -or
-    ($rootGroup.properties.Contains('details') -and $rootGroup.properties.details.Contains('parent') -and
-        $null -ne $rootGroup.properties.details.parent -and
-        -not [string]::IsNullOrWhiteSpace($rootGroup.properties.details.parent['id']))) {
-    throw 'The requested management group is not the verified tenant root. No writes performed.'
+$scope = "/providers/Microsoft.Management/managementGroups/$ManagementGroupId"
+$targetGroup = Invoke-PolicyRequest -Method GET -Path "${scope}?api-version=2020-05-01" -AllowNotFound
+if ($null -eq $targetGroup -or $targetGroup.id -ne $scope -or $targetGroup.properties.tenantId -ne $TenantId.ToString()) {
+    throw "Management group '$ManagementGroupId' was not found in tenant $TenantId or is not readable. No writes performed."
 }
-Write-Host "Definition scope: $scope ($($rootGroup.properties.displayName)). No assignment will be created."
+Write-Host "Definition scope: $scope ($($targetGroup.properties.displayName)). Assignable at this management group and below. No assignment will be created."
 $initiativeId = "$scope/providers/Microsoft.Authorization/policySetDefinitions/$InitiativeName"
 $builtInDefinitions = @{}
 $missingBuiltIns = [System.Collections.Generic.List[string]]::new()
