@@ -4,15 +4,17 @@
     and the 7 classic AI services listed in the Azure portal (Microsoft Foundry > AI services).
 
 .DESCRIPTION
-    Read-only collector and report builder. The workbook contains 29 visible sheets:
+    Read-only collector and report builder. The workbook contains 34 visible sheets:
 
       1     Summary                  Key figures (with links to the detail sheets), AI services
                                      summary (links to every service sheet), report sheet guide and
                                      data collection notes.
       2     Visuals                  Pivot tables + pivot charts: most common models, AI resources
                                      per service per region, token cost per deployed model,
-                                     deployment types, token usage, cost per service, model
-                                     retirement outlook, Defender findings, Advisor recommendations.
+                                     deployment types, token usage, cost per service, total AI
+                                     spend by cost line, ML workspace cost, model retirement
+                                     outlook, right-sizing status, content filter assessment,
+                                     Defender findings, Advisor recommendations.
       3     Recommendations          Azure Advisor recommendations for the AI resources.
       4     Service Retirements      Retirements from the model lifecycle (model catalog), Azure
                                      Advisor, Azure Service Health and the classic AI services.
@@ -22,7 +24,26 @@
       6     Security Best Practices  Microsoft Defender for Cloud plan coverage (Defender for AI
                                      services, Defender CSPM), recommendations (assessments) and
                                      security alerts for the AI resources.
-      7-29  One inventory sheet per AI service:
+      7     Security Hygiene         Per AI resource: key (local) authentication, key retrievals and
+                                     key rotation from the activity log, diagnostic logs, resource
+                                     locks, network exposure, managed identity and Defender for AI.
+      8     Content Filters          Content filter (RAI) policies compared with the Microsoft
+                                     DefaultV2 baseline, and the policy, blocked and harmful request
+                                     counts of every model deployment.
+      9     Capacity and Quota       Model quota use per subscription and region, and right-sizing
+                                     candidates: idle, over-allocated, throttled (HTTP 429) and
+                                     under-used or saturated provisioned (PTU) deployments.
+      10    AI Cost Reconciliation   Total AI spend: the AI resources plus AI reservation (PTU)
+                                     purchases, unused reservations, Marketplace partner models
+                                     (e.g. Claude), Copilot Studio and other AI meters, compared
+                                     with the total spend of the subscriptions.
+      11    ML Compute and Dependencies
+                                     Azure Machine Learning / Foundry hub workspace cost by meter,
+                                     compute instances and clusters (auto-shutdown, public IP, SSH,
+                                     idle nodes) and the workspace dependencies (storage, key vault,
+                                     container registry, Application Insights) with their security
+                                     settings.
+      12-34 One inventory sheet per AI service:
               Use with Foundry  Foundry, AI Hubs, Azure OpenAI, AI Search
               More services     Bot services, Computer vision, Custom vision, Content safety,
                                 Document intelligence, Face API, Health Insights, Machine Learning,
@@ -34,16 +55,22 @@
     Every cost is reported as three columns: Actual cost, Amortized cost and Reservation name
     (the reservation, e.g. a provisioned throughput (PTU) reservation, that covers the usage).
 
-    Three hidden Data_* sheets hold the flat datasets that feed the pivot tables
+    Four hidden Data_* sheets hold the flat datasets that feed the pivot tables
     (use -ShowDataSheets to keep them visible).
 
     Data sources (all read-only):
       * Azure Resource Graph ... resources, advisorresources, servicehealthresources, securityresources
-      * Azure Resource Manager . Cognitive Services model deployments, Foundry projects and the
-                                 model catalog (lifecycle / retirement dates)
-      * Azure Monitor metrics .. token usage per model deployment, API calls per account
+      * Azure Resource Manager . Cognitive Services model deployments, Foundry projects, content
+                                 filter (RAI) policies, model quota usage, the model catalog
+                                 (lifecycle / retirement dates), diagnostic settings, resource locks
+                                 and Azure Machine Learning computes
+      * Azure Monitor metrics .. token usage, busiest-hour tokens, requests per HTTP status (429),
+                                 last request, PTU utilization and content filter (RAI) request
+                                 counts per model deployment, API calls per account
+      * Azure activity log ..... key retrievals (listKeys) and key regenerations
       * Cost Management ........ actual and amortized cost per resource and per model token meter,
-                                 with the covering reservation
+                                 with the covering reservation; AI reservation purchases, unused
+                                 reservations, Marketplace models, Copilot and subscription totals
 
 .PARAMETER OutputPath
     Path of the .xlsx file to create. Default: .\AzureAIInventory_<yyyyMMdd-HHmm>.xlsx
@@ -69,7 +96,8 @@
     Tables always list Actual cost, Amortized cost and Reservation name.
 
 .PARAMETER EventDays
-    Look-back window in days for resolved Service Health events and Defender security alerts.
+    Look-back window in days for resolved Service Health events, Defender security alerts and the
+    activity log (key retrievals and key regenerations; the activity log keeps at most 90 days).
     Active Service Health events are always included. Default 90.
 
 .PARAMETER CriticalDays
@@ -89,6 +117,10 @@
 
 .PARAMETER SkipModelLifecycle
     Do not query the model catalog for model lifecycle and retirement dates.
+
+.PARAMETER SkipActivityLog
+    Do not read the activity log (key retrievals and key regenerations on the Security Hygiene
+    sheet).
 
 .PARAMETER AllServiceHealthEvents
     Include every Service Health event of the subscriptions that host AI resources, not only the
@@ -114,7 +146,8 @@
 
 .NOTES
     Requires  PowerShell 7.2+, modules Az.Accounts and ImportExcel. Run Connect-AzAccount first.
-    RBAC      Reader on the scope (inventory, Advisor, Service Health, model catalog, metrics),
+    RBAC      Reader on the scope (inventory, Advisor, Service Health, model catalog, quota,
+              content filters, metrics, activity log, diagnostic settings, locks, ML computes),
               Security Reader for Defender for Cloud data and Cost Management Reader for cost.
               Missing permissions only blank the affected columns or sections; see the
               "Data collection notes" at the bottom of the Summary sheet.
@@ -138,6 +171,7 @@ param(
     [switch] $SkipCost,
     [switch] $SkipMetrics,
     [switch] $SkipModelLifecycle,
+    [switch] $SkipActivityLog,
     [switch] $AllServiceHealthEvents,
     [switch] $ShowDataSheets,
     [switch] $Show
@@ -176,13 +210,23 @@ if (Test-Path -LiteralPath $OutputPath) {
     catch { throw "Cannot overwrite '$OutputPath'. Close it in Excel or choose another -OutputPath." }
 }
 
-$DoCost      = -not $SkipCost.IsPresent
-$DoMetrics   = -not $SkipMetrics.IsPresent
-$DoLifecycle = -not $SkipModelLifecycle.IsPresent
+$DoCost        = -not $SkipCost.IsPresent
+$DoMetrics     = -not $SkipMetrics.IsPresent
+$DoLifecycle   = -not $SkipModelLifecycle.IsPresent
+$DoActivityLog = -not $SkipActivityLog.IsPresent
 
 $UsageToUtc      = $RunStartedUtc
 $UsageFromUtc    = $RunStartedUtc.AddDays(-$UsageDays)   # rolling window of exactly UsageDays days
 $MetricsTimespan = '{0}/{1}' -f $UsageFromUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'), $UsageToUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+$UsageHours      = [Math]::Max(1.0, ($UsageToUtc - $UsageFromUtc).TotalHours)
+
+# Look-back for the last request of a model deployment (Azure Monitor keeps metrics for 93 days)
+$IdleLookbackDays = 90
+$IdleTimespan     = '{0}/{1}' -f $RunStartedUtc.AddDays(-$IdleLookbackDays).ToString('yyyy-MM-ddTHH:mm:ssZ'), $UsageToUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+# The activity log keeps 90 days of events
+$ActivityDays    = [Math]::Min(90, $EventDays)
+$ActivityFromUtc = $RunStartedUtc.AddDays(-$ActivityDays)
 
 $Notes = [System.Collections.Generic.List[string]]::new()
 function Add-Note {
@@ -191,11 +235,12 @@ function Add-Note {
     if (-not $Quiet) { Write-Warning $Message }
 }
 
-$script:StepNo = 0
+$script:StepNo    = 0
+$script:StepTotal = 11
 function Write-Step {
     param([string]$Text)
     $script:StepNo++
-    Write-Host ('[{0,2}/10] {1}' -f $script:StepNo, $Text) -ForegroundColor Cyan
+    Write-Host ('[{0,2}/{1}] {2}' -f $script:StepNo, $script:StepTotal, $Text) -ForegroundColor Cyan
 }
 
 #endregion
@@ -273,11 +318,52 @@ foreach ($svc in $ServiceCatalog) {
 
 # Regex used to decide whether a Service Health event / Advisor item concerns AI services.
 $AiServiceRegex  = '(?i)open ?ai|cognitive|\bai services\b|\bazure ai\b|foundry|machine learning|bot service|\bsearch\b|speech|translator|\bvision\b|\bface\b|form recognizer|document intelligence|\blanguage\b|content safety|content moderator|health insights|immersive reader|anomaly detector|metrics advisor|personalizer|qna maker|\bluis\b'
+# Service Health names services its own way (e.g. 'Azure OpenAI Service'); map them to the service names of this
+# workbook. The first match wins, so the specific patterns come before the generic ones.
+$HealthServiceMap = @(
+    @('(?i)open ?ai', 'Azure OpenAI'),
+    @('(?i)foundry|\bai studio\b', 'Foundry'),
+    @('(?i)machine learning', 'Machine Learning'),
+    @('(?i)\bai search\b|cognitive search', 'AI Search'),
+    @('(?i)bot service', 'Bot services'),
+    @('(?i)custom vision', 'Custom vision'),
+    @('(?i)\bvision\b', 'Computer vision'),
+    @('(?i)content safety', 'Content safety'),
+    @('(?i)document intelligence|form recognizer', 'Document intelligence'),
+    @('(?i)\bface\b', 'Face API'),
+    @('(?i)health insights', 'Health Insights'),
+    @('(?i)immersive reader', 'Immersive reader'),
+    @('(?i)language understanding|\bluis\b', 'Language understanding (classic)'),
+    @('(?i)\blanguage\b|text analytics', 'Language service'),
+    @('(?i)speech', 'Speech service'),
+    @('(?i)translator', 'Translator'),
+    @('(?i)anomaly detector', 'Anomaly detector (classic)'),
+    @('(?i)content moderator', 'Content moderator (classic)'),
+    @('(?i)metrics advisor', 'Metrics advisor (classic)'),
+    @('(?i)personalizer', 'Personalizer (classic)'),
+    @('(?i)qna maker', 'QnA maker (classic)')
+)
+function Get-CatalogServiceName {
+    param([string]$Name)
+    foreach ($m in $HealthServiceMap) { if ($Name -match $m[0]) { return $m[1] } }
+    return $null
+}
 $AiAdvisorRegex  = '(?i)open ?ai|cognitive ?services|\bai services\b|foundry|machine ?learning|\bai search\b|cognitive search|bot service|\bptu\b|provisioned throughput unit'
 $MeterStopWords  = @('inp', 'input', 'inputs', 'opt', 'outp', 'output', 'outputs', 'cached', 'cchd', 'cache', 'cch', 'cd', 'wr', 'write', 'gl', 'glbl', 'global',
     'dz', 'datazone', 'dzone', 'data', 'zone', 'regnl', 'regional', 'rgnl', 'reg', 'rg', 'tokens', 'token', 'tkns', 'tok', '1m', '1k', 'priority',
     'batch', 'paygo', 'inference', 'prompt', 'completion', 'completions', 'generated', 'units', 'unit', 'hosting', 'provisioned', 'managed',
     'ptu', 'hour', 'hours', 'hr', 'in', 'out', 'std', 'standard', 'shortco', 'longco')
+
+# Cost reconciliation: meter categories of AI services and partner models sold through Azure Marketplace.
+$AiMeterRegex       = '(?i)^(foundry|azure openai|cognitive services|azure cognitive search|azure ai|azure bot service|machine learning|azure machine learning)'
+$AiMarketplaceRegex = '(?i)claude|anthropic|mistral|codestral|ministral|llama|\bmeta\b|cohere|grok|\bxai\b|deepseek|\bjais\b|ai21|jamba|nixtla|timegen|\bphi-?\d|\bgpt|openai|gemini|black ?forest|\bflux|stability ai|stable diffusion|\bbria\b|nemotron|nvidia nim|core42|palmyra|\bwriter\b|paige|virchow|sakana|voyage ai|nomic|jina ai|qwen|kimi|moonshot'
+
+# Activity log operations that read or renew keys / secrets of AI resources.
+$KeyRetrievalRegex    = '(?i)/(list\w*keys|listsecrets|listchannelwithkeys)/action$'
+$KeyRegenerationRegex = '(?i)/(regenerate\w*|resynckeys)/action$'
+
+# Microsoft.DefaultV2 content filter baseline (what a deployment gets when no custom policy is assigned).
+$ContentHarmCategories = 'Hate', 'Sexual', 'Violence', 'Selfharm'
 
 #endregion
 
@@ -808,6 +894,7 @@ resources
     allowProjectManagement = tobool(p.allowProjectManagement),
     defaultProject = tostring(p.defaultProject),
     networkInjections = p.networkInjections,
+    internalId = tostring(p.internalId),
     dateCreated = tostring(p.dateCreated)
 '@
 
@@ -844,9 +931,9 @@ resources
 | extend p = properties
 | project id, name, type, location, resourceGroup, subscriptionId,
     skuName = tostring(sku.name),
-    skuCapacity = toint(sku.capacity),
+    skuCapacity = coalesce(toint(sku.capacity), toint(p.scaleSettings.instanceCount)),
     provisioningState = tostring(p.provisioningState),
-    modelId = coalesce(tostring(p.modelSettings.modelId), tostring(p.model)),
+    modelId = coalesce(tostring(p.modelSettings.modelId), tostring(p.model.assetId), iff(gettype(p.model) == 'string', tostring(p.model), '')),
     authMode = tostring(p.authMode),
     endpointUri = coalesce(tostring(p.inferenceEndpoint.uri), tostring(p.scoringUri)),
     instanceType = tostring(p.instanceType),
@@ -1036,6 +1123,18 @@ foreach ($e in @(Invoke-Arg -Label 'Machine Learning endpoints' -Query $kqlMlEnd
 $AiSubscriptions = @(@($Resources) + @($HubProjects) | ForEach-Object { $_.SubscriptionId } | Where-Object { $_ } | Sort-Object -Unique)
 Write-Host ("        {0} AI resource(s), {1} hub-based project(s), {2} ML endpoint(s) in {3} subscription(s)" -f $Resources.Count, $HubProjects.Count, $MlEndpoints.Count, $AiSubscriptions.Count)
 
+# Copilot Studio pay-as-you-go is billed on Power Platform accounts: their subscriptions are included in the
+# AI cost reconciliation even when they host no AI resource.
+$PowerPlatformSubs = @()
+if ($DoCost) {
+    $kqlPowerPlatform = @'
+resources
+| where type =~ 'microsoft.powerplatform/accounts'
+| project id, subscriptionId
+'@
+    $PowerPlatformSubs = @(Invoke-Arg -Label 'Power Platform accounts' -Query $kqlPowerPlatform | ForEach-Object { [string]$_.subscriptionId } | Where-Object { $_ } | Sort-Object -Unique)
+}
+
 #endregion
 
 #region 3. Model deployments, Foundry projects and usage metrics (ARM, parallel) -------
@@ -1056,19 +1155,35 @@ if ($cogItems.Count -gt 0) {
             $arm       = $using:ArmUrl
             $token     = $using:tok
             $ts        = $using:MetricsTimespan
+            $idleTs    = $using:IdleTimespan
+            $usageFrom = $using:UsageFromUtc
             $doMetrics = $using:DoMetrics
             $a         = $_
             $o = [ordered]@{
                 IdLower = $a.IdLower; Deployments = @(); DeploymentsError = $null; Projects = @(); ProjectsError = $null
                 Usage = @{}; UsageSlots = @(); UsageError = $null; Calls = $null; CallsError = $null
+                RaiPolicies = @(); RaiError = $null
+                Peak = @{}; PeakError = $null; Daily = @{}; DailyError = $null; Ptu = @{}; PtuError = $null
+                Rai = @{}; RaiSlots = @(); RaiMetricsError = $null
             }
+            # Parses a metrics timestamp (DateTime from ConvertFrom-Json or ISO text) as UTC.
+            $toUtc = {
+                param($v)
+                if ($v -is [datetime]) { if ($v.Kind -eq [DateTimeKind]::Local) { return $v.ToUniversalTime() } return [datetime]::SpecifyKind($v, 'Utc') }
+                return ([datetimeoffset]::Parse([string]$v, [cultureinfo]::InvariantCulture)).UtcDateTime
+            }
+            $deploymentOf = { param($t) [string](@($t.metadatavalues) | Where-Object { $_.name.value -eq 'modeldeploymentname' } | Select-Object -First 1).value }
             if ($a.Kind -in 'OpenAI', 'AIServices') {
-                $r = & $rest -Uri "$arm$($a.Id)/deployments?api-version=2024-10-01" -Token $token -AllPages
+                # 2025-06-01 adds spilloverDeploymentName; older API versions as fallback.
+                $r = & $rest -Uri "$arm$($a.Id)/deployments?api-version=2025-06-01" -Token $token -AllPages
+                if (-not $r.Ok -and $r.Status -in 400, 404) { $r = & $rest -Uri "$arm$($a.Id)/deployments?api-version=2024-10-01" -Token $token -AllPages }
                 if ($r.Ok) { $o.Deployments = @($r.Data) } else { $o.DeploymentsError = $r.Error }
                 if ($a.Kind -eq 'AIServices') {
                     $r = & $rest -Uri "$arm$($a.Id)/projects?api-version=2025-06-01" -Token $token -AllPages
                     if ($r.Ok) { $o.Projects = @($r.Data) } else { $o.ProjectsError = $r.Error }
                 }
+                $r = & $rest -Uri "$arm$($a.Id)/raiPolicies?api-version=2024-10-01" -Token $token -AllPages
+                if ($r.Ok) { $o.RaiPolicies = @($r.Data) } else { $o.RaiError = $r.Error }
                 if ($doMetrics) {
                     # Foundry "Models - Usage" metrics first (split by model name too, so usage of deleted
                     # deployments can still be attributed), classic Azure OpenAI metric names as fallback.
@@ -1079,7 +1194,8 @@ if ($cogItems.Count -gt 0) {
                     )
                     $best   = $null
                     $errors = [System.Collections.Generic.List[string]]::new()
-                    foreach ($set in $sets) {
+                    for ($si = 0; $si -lt $sets.Count; $si++) {
+                        $set   = $sets[$si]
                         $names = @($set.Map.Keys) -join ','
                         $u = "$arm$($a.Id)/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=$names&timespan=$ts&interval=FULL&aggregation=Total&top=1000&`$filter=$([uri]::EscapeDataString($set.Filter))"
                         $r = & $rest -Uri $u -Token $token
@@ -1104,11 +1220,115 @@ if ($cogItems.Count -gt 0) {
                                 $usage[$k][$slot] += $sum
                             }
                         }
-                        if (-not $best -or $slots.Count -gt $best.Slots.Count) { $best = @{ Usage = $usage; Slots = $slots } }
+                        if (-not $best -or $slots.Count -gt $best.Slots.Count) { $best = @{ Usage = $usage; Slots = $slots; Index = $si } }
                         if ($slots.ContainsKey('In') -and $slots.ContainsKey('Out')) { break }
                     }
                     if ($best -and $best.Slots.Count) { $o.Usage = $best.Usage; $o.UsageSlots = @($best.Slots.Keys) }
                     else { $o.UsageError = if ($errors.Count) { $errors[0] } else { 'no token usage metrics returned' } }
+
+                    if (@($o.Deployments).Count -gt 0) {
+                        $classic   = $best -and $best.Index -eq 1
+                        $depFilter = [uri]::EscapeDataString("ModelDeploymentName eq '*'")
+
+                        # Busiest hour per deployment (Azure Monitor has no per-minute totals over 30 days):
+                        # peak tokens per minute = tokens of the busiest hour / 60.
+                        $tn = if ($classic) { 'TokenTransaction' } else { 'TotalTokens' }
+                        $u = "$arm$($a.Id)/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=$tn&timespan=$ts&interval=PT1H&aggregation=Total&top=1000&`$filter=$depFilter"
+                        $r = & $rest -Uri $u -Token $token
+                        if ($r.Ok) {
+                            foreach ($m in @($r.Data.value)) {
+                                if ($m.errorCode -and $m.errorCode -ne 'Success') { $o.PeakError = "$($m.name.value): $($m.errorCode) $($m.errorMessage)"; continue }
+                                foreach ($t in @($m.timeseries)) {
+                                    $dn = & $deploymentOf $t
+                                    if (-not $dn) { continue }
+                                    $k   = $dn.ToLowerInvariant()
+                                    $max = 0.0
+                                    foreach ($pt in @($t.data)) { if ($null -ne $pt.total -and [double]$pt.total -gt $max) { $max = [double]$pt.total } }
+                                    if (-not $o.Peak.ContainsKey($k) -or $max -gt $o.Peak[$k]) { $o.Peak[$k] = $max }
+                                }
+                            }
+                        }
+                        else { $o.PeakError = $r.Error }
+
+                        # Requests per day and HTTP status code over 90 days: last request and throttling (429).
+                        $rn = if ($classic) { 'AzureOpenAIRequests' } else { 'ModelRequests' }
+                        $u = "$arm$($a.Id)/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=$rn&timespan=$idleTs&interval=P1D&aggregation=Total&top=1000&`$filter=$([uri]::EscapeDataString("ModelDeploymentName eq '*' and StatusCode eq '*'"))"
+                        $r = & $rest -Uri $u -Token $token
+                        if ($r.Ok) {
+                            foreach ($m in @($r.Data.value)) {
+                                if ($m.errorCode -and $m.errorCode -ne 'Success') { $o.DailyError = "$($m.name.value): $($m.errorCode) $($m.errorMessage)"; continue }
+                                foreach ($t in @($m.timeseries)) {
+                                    $dn = & $deploymentOf $t
+                                    if (-not $dn) { continue }
+                                    $sc = [string](@($t.metadatavalues) | Where-Object { $_.name.value -eq 'statuscode' } | Select-Object -First 1).value
+                                    $k  = $dn.ToLowerInvariant()
+                                    if (-not $o.Daily.ContainsKey($k)) { $o.Daily[$k] = @{ Last = $null; Throttled = 0.0 } }
+                                    $d = $o.Daily[$k]
+                                    foreach ($pt in @($t.data)) {
+                                        if ($null -eq $pt.total -or [double]$pt.total -le 0) { continue }
+                                        $day = & $toUtc $pt.timeStamp
+                                        if ($null -eq $d.Last -or $day -gt $d.Last) { $d.Last = $day }
+                                        if ($sc -eq '429' -and $day -ge $usageFrom.Date) { $d.Throttled += [double]$pt.total }
+                                    }
+                                }
+                            }
+                        }
+                        else { $o.DailyError = $r.Error }
+
+                        # Provisioned throughput (PTU) utilization, hourly average per deployment.
+                        if (@($o.Deployments | Where-Object { [string]$_.sku.name -match '(?i)provisioned' }).Count) {
+                            foreach ($pn in 'AzureOpenAIProvisionedManagedUtilizationV2', 'ProvisionedUtilization') {
+                                $u = "$arm$($a.Id)/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=$pn&timespan=$ts&interval=PT1H&aggregation=Average&top=1000&`$filter=$depFilter"
+                                $r = & $rest -Uri $u -Token $token
+                                if (-not $r.Ok) { $o.PtuError = $r.Error; continue }
+                                $got = $false
+                                foreach ($m in @($r.Data.value)) {
+                                    if ($m.errorCode -and $m.errorCode -ne 'Success') { $o.PtuError = "$($m.name.value): $($m.errorCode) $($m.errorMessage)"; continue }
+                                    $got = $true
+                                    foreach ($t in @($m.timeseries)) {
+                                        $dn = & $deploymentOf $t
+                                        if (-not $dn) { continue }
+                                        $sum = 0.0; $peak = 0.0
+                                        foreach ($pt in @($t.data)) { if ($null -ne $pt.average) { $v = [double]$pt.average; $sum += $v; if ($v -gt $peak) { $peak = $v } } }
+                                        $o.Ptu[$dn.ToLowerInvariant()] = @{ Sum = $sum; Peak = $peak }
+                                    }
+                                }
+                                if ($got) { $o.PtuError = $null; break }
+                            }
+                        }
+
+                        # Content filter (RAI) request counts per deployment; one metric at a time if the
+                        # combined request is rejected (a metric missing on the account fails the request).
+                        $raiMap   = [ordered]@{ RAITotalRequests = 'Total'; RAIHarmfulRequests = 'Harmful'; RAIRejectedRequests = 'Rejected' }
+                        $raiSlots = @{}
+                        $batches  = @(, @($raiMap.Keys))
+                        for ($bi = 0; $bi -lt $batches.Count; $bi++) {
+                            $u = "$arm$($a.Id)/providers/Microsoft.Insights/metrics?api-version=2023-10-01&metricnames=$(@($batches[$bi]) -join ',')&timespan=$ts&interval=FULL&aggregation=Total&top=1000&`$filter=$depFilter"
+                            $r = & $rest -Uri $u -Token $token
+                            if (-not $r.Ok) {
+                                if ($bi -eq 0 -and $r.Status -eq 400) { foreach ($mn in $raiMap.Keys) { $batches += , @($mn) } }
+                                $o.RaiMetricsError = $r.Error
+                                continue
+                            }
+                            foreach ($m in @($r.Data.value)) {
+                                $slot = $raiMap[[string]$m.name.value]
+                                if (-not $slot) { continue }
+                                if ($m.errorCode -and $m.errorCode -ne 'Success') { $o.RaiMetricsError = "$($m.name.value): $($m.errorCode) $($m.errorMessage)"; continue }
+                                $raiSlots[$slot] = $true
+                                foreach ($t in @($m.timeseries)) {
+                                    $dn = & $deploymentOf $t
+                                    if (-not $dn) { continue }
+                                    $sum = 0.0
+                                    foreach ($pt in @($t.data)) { if ($null -ne $pt.total) { $sum += [double]$pt.total } }
+                                    $k = $dn.ToLowerInvariant()
+                                    if (-not $o.Rai.ContainsKey($k)) { $o.Rai[$k] = @{ Total = 0.0; Harmful = 0.0; Rejected = 0.0 } }
+                                    $o.Rai[$k][$slot] += $sum
+                                }
+                            }
+                        }
+                        $o.RaiSlots = @($raiSlots.Keys)
+                        if ($raiSlots.Count) { $o.RaiMetricsError = $null }
+                    }
                 }
             }
             if ($doMetrics) {
@@ -1131,11 +1351,15 @@ if ($cogItems.Count -gt 0) {
         foreach ($x in @($results)) { if ($x) { $AcctResults[$x.IdLower] = $x } }
     }
 
-    foreach ($prop in 'DeploymentsError', 'ProjectsError', 'UsageError', 'CallsError') {
+    $errorLabels = [ordered]@{
+        DeploymentsError = 'Model deployments'; ProjectsError = 'Foundry projects'; UsageError = 'Token usage metrics'; CallsError = 'API call metrics'
+        RaiError = 'Content filter (RAI) policies'; PeakError = 'Busiest-hour token metrics (peak TPM)'; DailyError = 'Daily request metrics (last request / HTTP 429)'
+        PtuError = 'PTU utilization metrics'; RaiMetricsError = 'Content filter request metrics'
+    }
+    foreach ($prop in $errorLabels.Keys) {
         $failed = @($AcctResults.Values | Where-Object { $_.$prop })
         if ($failed.Count) {
-            $what = @{ DeploymentsError = 'Model deployments'; ProjectsError = 'Foundry projects'; UsageError = 'Token usage metrics'; CallsError = 'API call metrics' }[$prop]
-            Add-Note ('{0} unavailable for {1} account(s), e.g. {2}: {3}' -f $what, $failed.Count, (Get-LastSegment $failed[0].IdLower), $failed[0].$prop)
+            Add-Note ('{0} unavailable for {1} account(s), e.g. {2}: {3}' -f $errorLabels[$prop], $failed.Count, (Get-LastSegment $failed[0].IdLower), $failed[0].$prop)
         }
     }
 }
@@ -1163,14 +1387,164 @@ foreach ($c in $cogItems) {
 
 #endregion
 
+#region 3b. Security hygiene and ML compute data (ARM + Resource Graph, parallel) -------------
+
+Write-Step 'Collecting diagnostic settings, resource locks, key activity (activity log), ML computes and dependencies'
+
+$ProviderNames = @{
+    'microsoft.cognitiveservices'       = 'Microsoft.CognitiveServices'
+    'microsoft.machinelearningservices' = 'Microsoft.MachineLearningServices'
+    'microsoft.search'                  = 'Microsoft.Search'
+    'microsoft.botservice'              = 'Microsoft.BotService'
+}
+$MlWorkspaces = @(@($Resources) + @($HubProjects) | Where-Object { $_.Type -eq 'microsoft.machinelearningservices/workspaces' })
+
+$hygieneWork = [System.Collections.Generic.List[object]]::new()
+foreach ($i in $Resources) {
+    $hygieneWork.Add([pscustomobject]@{ Kind = 'diag'; Key = $i.IdLower; Uri = "$ArmUrl$($i.Id)/providers/Microsoft.Insights/diagnosticSettings?api-version=2021-05-01-preview" })
+}
+foreach ($w in $MlWorkspaces) {
+    $hygieneWork.Add([pscustomobject]@{ Kind = 'computes'; Key = $w.IdLower; Uri = "$ArmUrl$($w.Id)/computes?api-version=2024-10-01" })
+}
+foreach ($s in $AiSubscriptions) {
+    $hygieneWork.Add([pscustomobject]@{ Kind = 'locks'; Key = $s; Uri = "$ArmUrl/subscriptions/$s/providers/Microsoft.Authorization/locks?api-version=2020-05-01" })
+    if ($DoActivityLog) {
+        $providers = @(@($Resources) + @($HubProjects) | Where-Object { $_.SubscriptionId -eq $s } | ForEach-Object { ($_.Type -split '/')[0] } | Sort-Object -Unique)
+        foreach ($pv in $providers) {
+            $pvName = if ($ProviderNames.ContainsKey($pv)) { $ProviderNames[$pv] } else { $pv }
+            $filter = "eventTimestamp ge '{0}' and eventTimestamp le '{1}' and resourceProvider eq '{2}'" -f `
+                $ActivityFromUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'), $RunStartedUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'), $pvName
+            $select = 'operationName,caller,resourceId,status,eventTimestamp'
+            $hygieneWork.Add([pscustomobject]@{ Kind = 'activity'; Key = "$s|$pv"; Uri = "$ArmUrl/subscriptions/$s/providers/Microsoft.Insights/eventtypes/management/values?api-version=2015-04-01&`$filter=$([uri]::EscapeDataString($filter))&`$select=$([uri]::EscapeDataString($select))" })
+        }
+    }
+}
+
+$DiagByRes     = @{}   # lower-case resource id -> diagnostic settings
+$ComputesByWs  = @{}   # lower-case workspace id -> computes
+$LocksBySub    = @{}   # subscription id -> management locks (all scopes)
+$KeyActivity   = @{}   # lower-case top-level resource id -> key retrieval / regeneration statistics
+$ActivityOk    = @{}   # "subscription|provider" -> activity log read
+$hygieneErrors = @{}
+if ($hygieneWork.Count) {
+    $retrievalRx = $KeyRetrievalRegex
+    $regenRx     = $KeyRegenerationRegex
+    for ($b = 0; $b -lt $hygieneWork.Count; $b += $BatchSize) {
+        $batch = @($hygieneWork[$b..([Math]::Min($b + $BatchSize, $hygieneWork.Count) - 1)])
+        $tok   = Get-ArmToken
+        $results = $batch | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
+            $rest  = [scriptblock]::Create($using:RestCoreText)
+            $w     = $_
+            $r     = & $rest -Uri $w.Uri -Token $using:tok -AllPages
+            $out   = [ordered]@{ Kind = $w.Kind; Key = $w.Key; Ok = $r.Ok; Error = $r.Error; Data = $null }
+            if ($r.Ok -and $w.Kind -eq 'activity') {
+                # Aggregated here, the raw events (with caller claims) are not kept.
+                $retrievalRx = $using:retrievalRx
+                $regenRx     = $using:regenRx
+                $agg = @{}
+                foreach ($e in @($r.Data)) {
+                    if ([string]$e.status.value -ne 'Succeeded') { continue }
+                    $op    = [string]$e.operationName.value
+                    $isGet = $op -match $retrievalRx
+                    $isNew = -not $isGet -and $op -match $regenRx
+                    if (-not $isGet -and -not $isNew) { continue }
+                    $parts = ([string]$e.resourceId).Trim('/').Split('/')
+                    if ($parts.Count -lt 8) { continue }
+                    $top = ('/' + ($parts[0..7] -join '/')).ToLowerInvariant()
+                    if (-not $agg.ContainsKey($top)) { $agg[$top] = @{ Retrievals = 0; Callers = @{}; LastRetrieval = $null; Regenerations = 0; LastRegeneration = $null } }
+                    $st   = $agg[$top]
+                    $when = $e.eventTimestamp
+                    $when = if ($when -is [datetime]) { if ($when.Kind -eq [DateTimeKind]::Local) { $when.ToUniversalTime() } else { [datetime]::SpecifyKind($when, 'Utc') } }
+                            else { ([datetimeoffset]::Parse([string]$when, [cultureinfo]::InvariantCulture)).UtcDateTime }
+                    if ($isGet) {
+                        $st.Retrievals++
+                        $st.Callers[[string]$e.caller] = $true
+                        if ($null -eq $st.LastRetrieval -or $when -gt $st.LastRetrieval) { $st.LastRetrieval = $when }
+                    }
+                    else {
+                        $st.Regenerations++
+                        if ($null -eq $st.LastRegeneration -or $when -gt $st.LastRegeneration) { $st.LastRegeneration = $when }
+                    }
+                }
+                $out.Data = $agg
+            }
+            elseif ($r.Ok) { $out.Data = @($r.Data) }
+            [pscustomobject]$out
+        }
+        foreach ($x in @($results)) {
+            if (-not $x) { continue }
+            if (-not $x.Ok) {
+                if (-not $hygieneErrors.ContainsKey($x.Kind)) { $hygieneErrors[$x.Kind] = [System.Collections.Generic.List[object]]::new() }
+                $hygieneErrors[$x.Kind].Add($x)
+                continue
+            }
+            switch ($x.Kind) {
+                'diag'     { $DiagByRes[$x.Key] = @($x.Data) }
+                'computes' { $ComputesByWs[$x.Key] = @($x.Data) }
+                'locks'    { $LocksBySub[$x.Key] = @($x.Data) }
+                'activity' {
+                    $ActivityOk[$x.Key] = $true
+                    foreach ($k in $x.Data.Keys) { $KeyActivity[$k] = $x.Data[$k] }
+                }
+            }
+        }
+    }
+    $hygieneLabels = @{ diag = 'Diagnostic settings'; computes = 'Machine Learning computes'; locks = 'Resource locks'; activity = 'Activity log (key retrievals and regenerations)' }
+    foreach ($k in $hygieneErrors.Keys) {
+        $f = $hygieneErrors[$k]
+        $example = if ($k -in 'diag', 'computes') { Get-LastSegment $f[0].Key } else { $f[0].Key }
+        Add-Note ('{0} unavailable for {1} item(s), e.g. {2}: {3}' -f $hygieneLabels[$k], $f.Count, $example, $f[0].Error)
+    }
+}
+if (-not $DoActivityLog) { Add-Note 'Activity log skipped (-SkipActivityLog): key retrieval and key rotation columns of the Security Hygiene sheet are blank.' -Quiet }
+
+# Workspace dependencies (storage account, key vault, container registry, Application Insights).
+$DependencyInfo = @{}   # lower-case dependency id -> Resource Graph row
+$depIds = @($MlWorkspaces | ForEach-Object { $_.Raw.storageAccount, $_.Raw.keyVault, $_.Raw.applicationInsights, $_.Raw.containerRegistry } |
+    Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+for ($i = 0; $i -lt $depIds.Count; $i += 100) {
+    $chunk = @($depIds[$i..([Math]::Min($i + 99, $depIds.Count - 1))])
+    $list  = ($chunk | ForEach-Object { "'" + ($_ -replace "'", '') + "'" }) -join ', '
+    $kqlDependencies = @"
+resources
+| where tolower(id) in ($list)
+| extend p = properties
+| project id = tolower(id), name, type = tolower(type), resourceGroup, subscriptionId, location,
+    skuName = tostring(sku.name),
+    publicNetworkAccess = tostring(p.publicNetworkAccess),
+    networkDefaultAction = coalesce(tostring(p.networkAcls.defaultAction), tostring(p.networkRuleSet.defaultAction)),
+    privateEndpoints = coalesce(array_length(p.privateEndpointConnections), 0),
+    allowSharedKeyAccess = tostring(p.allowSharedKeyAccess),
+    allowBlobPublicAccess = tostring(p.allowBlobPublicAccess),
+    minimumTlsVersion = tostring(p.minimumTlsVersion),
+    enablePurgeProtection = tostring(p.enablePurgeProtection),
+    enableSoftDelete = tostring(p.enableSoftDelete),
+    enableRbacAuthorization = tostring(p.enableRbacAuthorization),
+    adminUserEnabled = tostring(p.adminUserEnabled),
+    disableLocalAuth = coalesce(tostring(p.DisableLocalAuth), tostring(p.disableLocalAuth)),
+    workspaceResourceId = coalesce(tostring(p.WorkspaceResourceId), tostring(p.workspaceResourceId)),
+    ingestionAccess = tostring(p.publicNetworkAccessForIngestion),
+    queryAccess = tostring(p.publicNetworkAccessForQuery)
+"@
+    foreach ($d in @(Invoke-Arg -Label 'ML workspace dependencies' -Query $kqlDependencies)) { $DependencyInfo[[string]$d.id] = $d }
+}
+$computeCount = @($ComputesByWs.Values | ForEach-Object { $_ } | ForEach-Object { ([string]$_.id).ToLowerInvariant() } | Sort-Object -Unique).Count
+Write-Host ("        {0} diagnostic setting list(s), {1} lock list(s), {2}, {3} ML compute(s), {4} of {5} dependencies found" -f `
+    $DiagByRes.Count, $LocksBySub.Count, $(if ($DoActivityLog) { "$($KeyActivity.Count) resource(s) with key activity" } else { 'activity log skipped' }), $computeCount, $DependencyInfo.Count, $depIds.Count)
+
+#endregion
+
 #region 4. Model lifecycle / retirement dates (model catalog, parallel) -----------------
 
-Write-Step 'Checking model lifecycle and retirement dates (model catalog)'
+Write-Step 'Checking model lifecycle, retirement dates (model catalog) and model quota'
 
 $CatalogIndex   = @{}   # sub|region|model|version -> catalog entries (one per account kind)
 $CatalogByModel = @{}   # sub|region|model         -> catalog entries (all versions)
 $CatalogStatus  = @{}   # sub|region               -> $true (read) / $false (failed)
-if ($DoLifecycle -and $modelHosts.Count -gt 0) {
+$QuotaByPair    = @{}   # sub|region               -> model quota usages (Cognitive Services usages API)
+$QuotaIndex     = @{}   # sub|region|usage name    -> usage
+$QuotaFailures  = 0     # sub|region pairs whose quota could not be read
+if ($modelHosts.Count -gt 0) {
     $pairs = @($modelHosts | Group-Object -Property { '{0}|{1}' -f $_.SubscriptionId, $_.Location } | ForEach-Object {
             [pscustomobject]@{ Sub = $_.Group[0].SubscriptionId; Loc = $_.Group[0].Location } })
     $catalogResults = [System.Collections.Generic.List[object]]::new()
@@ -1179,13 +1553,27 @@ if ($DoLifecycle -and $modelHosts.Count -gt 0) {
         $tok = Get-ArmToken
         $batchResults = $batch | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
             $rest = [scriptblock]::Create($using:RestCoreText)
-            $r = & $rest -Uri "$($using:ArmUrl)/subscriptions/$($_.Sub)/providers/Microsoft.CognitiveServices/locations/$($_.Loc)/models?api-version=2024-10-01" -Token $using:tok -AllPages
-            [pscustomobject]@{ Sub = $_.Sub; Loc = $_.Loc; Ok = $r.Ok; Models = @($r.Data); Error = $r.Error }
+            $base = "$($using:ArmUrl)/subscriptions/$($_.Sub)/providers/Microsoft.CognitiveServices/locations/$($_.Loc)"
+            $o = [ordered]@{ Sub = $_.Sub; Loc = $_.Loc; Ok = $false; Models = @(); Error = $null; QuotaOk = $false; Usages = @(); QuotaError = $null }
+            if ($using:DoLifecycle) {
+                $r = & $rest -Uri "$base/models?api-version=2024-10-01" -Token $using:tok -AllPages
+                $o.Ok = $r.Ok; $o.Models = @($r.Data); $o.Error = $r.Error
+            }
+            $r = & $rest -Uri "$base/usages?api-version=2023-05-01" -Token $using:tok -AllPages
+            $o.QuotaOk = $r.Ok; $o.Usages = @($r.Data); $o.QuotaError = $r.Error
+            [pscustomobject]$o
         }
         foreach ($x in @($batchResults)) { if ($x) { $catalogResults.Add($x) } }
     }
     foreach ($c in $catalogResults) {
-        $CatalogStatus['{0}|{1}' -f $c.Sub, $c.Loc] = [bool]$c.Ok
+        $pairKey = '{0}|{1}' -f $c.Sub, $c.Loc
+        if ($c.QuotaOk) {
+            $QuotaByPair[$pairKey] = @($c.Usages | Where-Object { $_ -and $_.name.value })
+            foreach ($u in $QuotaByPair[$pairKey]) { $QuotaIndex['{0}|{1}' -f $pairKey, ([string]$u.name.value).ToLowerInvariant()] = $u }
+        }
+        else { $QuotaFailures++; Add-Note "Model quota unavailable for $(Get-SubscriptionName $c.Sub) / $($c.Loc): $($c.QuotaError)" }
+        if (-not $DoLifecycle) { continue }
+        $CatalogStatus[$pairKey] = [bool]$c.Ok
         if (-not $c.Ok) { Add-Note "Model catalog unavailable for $(Get-SubscriptionName $c.Sub) / $($c.Loc): $($c.Error)"; continue }
         foreach ($e in $c.Models) {
             $m = $e.model
@@ -1200,7 +1588,177 @@ if ($DoLifecycle -and $modelHosts.Count -gt 0) {
     }
 }
 
-# Model deployment records (Foundry + Azure OpenAI) enriched with lifecycle and usage.
+function Get-DeploymentQuota {
+    # Quota (usages API entry) consumed by a deployment: the usage name published by the model catalog for
+    # the deployment type, then the <format>.<type>.<model> convention, then a punctuation-insensitive match
+    # (e.g. gpt-4.1 -> OpenAI.GlobalStandard.gpt4.1). Provisioned (PTU) quota is per deployment type.
+    param($Account, [string]$ModelName, [string]$ModelVersion, [string]$ModelFormat, [string]$SkuName)
+    $pair = '{0}|{1}' -f $Account.SubscriptionId, $Account.Location
+    if (-not $script:QuotaByPair.ContainsKey($pair) -or -not $SkuName) { return $null }
+    $names = [System.Collections.Generic.List[string]]::new()
+    $catalog = if ($ModelName) { $script:CatalogIndex['{0}|{1}|{2}' -f $pair, $ModelName.ToLowerInvariant(), $ModelVersion] }
+    foreach ($e in @($catalog)) {
+        foreach ($s in @($e.model.skus)) {
+            if ($s -and [string]$s.name -eq $SkuName -and $s.usageName -and [string]$s.usageName -notmatch '(?i)finetune') { $names.Add([string]$s.usageName) }
+        }
+    }
+    foreach ($prefix in @($ModelFormat, 'OpenAI', 'AIServices') | Where-Object { $_ } | Select-Object -Unique) {
+        if ($SkuName -match '(?i)provisioned') { $names.Add("$prefix.$SkuName") }
+        if ($ModelName) { $names.Add("$prefix.$SkuName.$ModelName") }
+    }
+    foreach ($n in $names) {
+        $u = $script:QuotaIndex['{0}|{1}' -f $pair, $n.ToLowerInvariant()]
+        if ($u) { return $u }
+    }
+    if (-not $ModelName) { return $null }
+    $want = Get-NormalizedName "$SkuName.$ModelName"
+    foreach ($u in $script:QuotaByPair[$pair]) {
+        $parts = ([string]$u.name.value).Split('.', 2)
+        if ($parts.Count -eq 2 -and (Get-NormalizedName $parts[1]) -eq $want) { return $u }
+    }
+    return $null
+}
+
+function Get-RightSizing {
+    # Right-sizing status and advice of one model deployment from its metrics, rate limit and quota.
+    param($Rec, [bool]$IsPtu, [double]$PerUnit, $QuotaUsage)
+    $r = [pscustomobject]@{ Status = ''; Advice = '' }
+    if (-not $script:DoMetrics -or $null -eq $Rec.'Idle days') { return $r }
+    $cap     = [double]$(if ($null -ne $Rec.Capacity) { $Rec.Capacity } else { 0 })
+    $quotaFull = $QuotaUsage -and [double]$QuotaUsage.limit -gt 0 -and [double]$QuotaUsage.currentValue -ge 0.9 * [double]$QuotaUsage.limit
+    $freed   = if ($quotaFull) { ' (the quota is {0:P0} used, so this frees quota for other deployments)' -f ([double]$QuotaUsage.currentValue / [double]$QuotaUsage.limit) } else { '' }
+    $created = $Rec.'Created (UTC)'
+    if ($created -and ($RunStartedUtc - $created).TotalDays -lt 7) {
+        $r.Status = 'New'; $r.Advice = 'Created less than 7 days ago - too early to assess.'
+        return $r
+    }
+    if ([int]$Rec.'Idle days' -ge 30) {
+        $last = if ($Rec.'Last request date') { 'last request on {0:yyyy-MM-dd}' -f $Rec.'Last request date' } else { "no request in the last $($script:IdleLookbackDays) days" }
+        $what = if ($IsPtu) { "stop paying for $cap provisioned throughput unit(s)" } else { "release $cap unit(s) of quota" }
+        $r.Status = 'Idle'; $r.Advice = "Idle for $($Rec.'Idle days') days ($last). Delete the deployment to $what$freed."
+        return $r
+    }
+    $throttled = [double]$(if ($null -ne $Rec.'Throttled requests (429)') { $Rec.'Throttled requests (429)' } else { 0 })
+    $requests  = [double]$(if ($null -ne $Rec.Requests) { $Rec.Requests } else { 0 })
+    if ($IsPtu) {
+        $avg  = $Rec.'PTU utilization avg'
+        $peak = $Rec.'PTU utilization peak'
+        if ($null -eq $avg) { return $r }
+        if ($null -ne $peak -and [double]$peak -ge 0.95 -and -not $Rec.'Spillover deployment') {
+            $r.Status = 'PTU saturated'
+            $r.Advice = 'The busiest hour averaged {0:P0} utilization and no spillover deployment is set. Add PTUs or configure spillover to a standard deployment to avoid HTTP 429.' -f [double]$peak
+            return $r
+        }
+        if ([double]$avg -lt 0.3) {
+            $r.Status = 'PTU under-used'
+            $r.Advice = 'Average utilization {0:P0} (busiest hour {1:P0}) of {2} PTU. Reduce the PTUs (or the reservation at renewal) or move the traffic to a pay-as-you-go deployment.' -f [double]$avg, [double]$(if ($null -ne $peak) { $peak } else { 0 }), $cap
+            return $r
+        }
+        $r.Status = 'OK'
+        return $r
+    }
+    if ($throttled -ge 100 -or ($requests -gt 0 -and $throttled / $requests -ge 0.01)) {
+        $share = if ($requests -gt 0) { ' ({0:P1} of the requests)' -f ($throttled / $requests) } else { '' }
+        $room  = if ($QuotaUsage -and [double]$QuotaUsage.limit -gt 0) {
+                     $free = [double]$QuotaUsage.limit - [double]$QuotaUsage.currentValue
+                     if ($free -gt 0) { ' {0:N0} unit(s) of quota are still available.' -f $free } else { ' The quota is full: request a quota increase or use a Global / Data zone deployment type.' }
+                 } else { '' }
+        $r.Status = 'Throttled'
+        $r.Advice = ('{0:N0} requests were throttled (HTTP 429){1}. Raise the tokens-per-minute limit, spread the load or add a spillover / fallback deployment.{2}' -f $throttled, $share, $room)
+        return $r
+    }
+    $pct = $Rec.'Peak % of TPM limit'
+    if ($null -ne $pct -and [double]$pct -lt 0.10 -and $Rec.'Tokens per minute' -ge 10000 -and $PerUnit -gt 0) {
+        $suggest = [Math]::Max(1, [Math]::Ceiling(3 * [double]$Rec.'Peak TPM (busiest hour)' / $PerUnit))
+        if ($suggest -lt $cap) {
+            $r.Status = 'Over-allocated'
+            $r.Advice = ('The busiest hour used {0:P1} of the {1:N0} tokens-per-minute limit. Lower the capacity from {2} to about {3} (3x the busiest-hour average) to release quota{4}.' -f [double]$pct, [double]$Rec.'Tokens per minute', $cap, $suggest, $freed)
+            return $r
+        }
+    }
+    $r.Status = 'OK'
+    return $r
+}
+
+function Get-ContentFilterProfile {
+    # Compares one content filter (RAI) policy with the Microsoft.DefaultV2 baseline: the four harm categories
+    # block Medium+ on prompts and completions, prompt shields (jailbreak) and protected material (text) block,
+    # protected material (code) annotates, indirect attacks and profanity are off.
+    param($Policy)
+    $pp       = $Policy.properties
+    $filters  = @($pp.contentFilters | Where-Object { $_ })
+    $relaxed  = [System.Collections.Generic.List[string]]::new()
+    $stricter = [System.Collections.Generic.List[string]]::new()
+    $find = { param([string]$Name, [string]$Source) @($filters | Where-Object { [string]$_.name -eq $Name -and (-not $Source -or [string]$_.source -eq $Source) }) | Select-Object -First 1 }
+    $state = { param($f) if (-not $f -or -not $f.enabled) { 'Off' } elseif (-not $f.blocking) { 'Annotate' } else { 'Block' } }
+    $harm = [ordered]@{}
+    foreach ($cat in $script:ContentHarmCategories) {
+        $cells = foreach ($src in 'Prompt', 'Completion') {
+            $f     = & $find $cat $src
+            $label = '{0} ({1})' -f $(if ($cat -eq 'Selfharm') { 'Self-harm' } else { $cat }), $src.ToLowerInvariant()
+            switch (& $state $f) {
+                'Off'      { $relaxed.Add("$label off"); 'Off' }
+                'Annotate' { $relaxed.Add("$label annotate only"); 'Annotate' }
+                default {
+                    switch ([string]$f.severityThreshold) {
+                        'Low'    { $stricter.Add("$label blocks Low+"); 'Low+' }
+                        'Medium' { 'Medium+' }
+                        'High'   { $relaxed.Add("$label blocks High only"); 'High' }
+                        default  { [string]$f.severityThreshold }
+                    }
+                }
+            }
+        }
+        $harm[$cat] = @($cells) -join ' / '
+    }
+    $jailbreak = & $state (& $find 'Jailbreak' 'Prompt')
+    if ($jailbreak -ne 'Block') { $relaxed.Add("Prompt shields (jailbreak) $($jailbreak.ToLowerInvariant())") }
+    $indirect = & $state (& $find 'Indirect Attack' '')
+    if ($indirect -ne 'Off') { $stricter.Add("Indirect attacks $($indirect.ToLowerInvariant())") }
+    if ((& $state (& $find 'Indirect Attack Spotlighting' '')) -ne 'Off') { $stricter.Add('Spotlighting on') }
+    $pmText = & $state (& $find 'Protected Material Text' '')
+    if ($pmText -ne 'Block') { $relaxed.Add("Protected material (text) $($pmText.ToLowerInvariant())") }
+    $pmCode = & $state (& $find 'Protected Material Code' '')
+    if ($pmCode -eq 'Off') { $relaxed.Add('Protected material (code) off') } elseif ($pmCode -eq 'Block') { $stricter.Add('Protected material (code) blocks') }
+    $profanity = & $state (& $find 'Profanity' '')
+    if ($profanity -ne 'Off') { $stricter.Add("Profanity $($profanity.ToLowerInvariant())") }
+    $blocklists = @($pp.customBlocklists | Where-Object { $_ -and $_.blocklistName } | ForEach-Object { [string]$_.blocklistName } | Sort-Object -Unique)
+    if ($blocklists.Count) { $stricter.Add("$($blocklists.Count) custom blocklist(s)") }
+    $mode = [string]$pp.mode
+    if ($mode -match '(?i)async|deferred') { $relaxed.Add("Mode $mode (streamed content is filtered after it is returned)") }
+    [pscustomobject]@{
+        Name           = [string]$Policy.name
+        Type           = $(if ([string]$pp.type -eq 'SystemManaged' -or ([string]$Policy.name).StartsWith('Microsoft.')) { 'System' } else { 'Custom' })
+        BasePolicy     = [string]$pp.basePolicyName
+        Mode           = $mode
+        Hate           = $harm['Hate']
+        Sexual         = $harm['Sexual']
+        Violence       = $harm['Violence']
+        SelfHarm       = $harm['Selfharm']
+        Jailbreak      = $jailbreak
+        IndirectAttack = $indirect
+        ProtectedText  = $pmText
+        ProtectedCode  = $pmCode
+        Profanity      = $profanity
+        Blocklists     = ($blocklists -join ', ')
+        Assessment     = $(if ($relaxed.Count) { 'Relaxed' } elseif ($stricter.Count) { 'Stricter' } else { 'Default' })
+        Relaxed        = ($relaxed -join '; ')
+        Stricter       = ($stricter -join '; ')
+    }
+}
+
+# Content filter (RAI) policies per account, compared with the DefaultV2 baseline.
+$RaiProfiles = @{}   # account id|policy name (lower-case) -> profile
+foreach ($acct in $modelHosts) {
+    $res = $AcctResults[$acct.IdLower]
+    if (-not $res) { continue }
+    foreach ($p in @($res.RaiPolicies)) {
+        if (-not $p -or -not $p.name) { continue }
+        $RaiProfiles['{0}|{1}' -f $acct.IdLower, ([string]$p.name).ToLowerInvariant()] = Get-ContentFilterProfile $p
+    }
+}
+
+# Model deployment records (Foundry + Azure OpenAI) enriched with lifecycle, usage, right-sizing and quota.
 $ModelHostDeployments = [System.Collections.Generic.List[object]]::new()
 foreach ($acct in $modelHosts) {
     $res = $AcctResults[$acct.IdLower]
@@ -1211,6 +1769,10 @@ foreach ($acct in $modelHosts) {
     $hasOut   = $usageOk -and $slots -contains 'Out'
     $hasTotal = $usageOk -and ($slots -contains 'Total' -or ($hasIn -and $hasOut))
     $hasReq   = $usageOk -and $slots -contains 'Req'
+    $peakOk   = $DoMetrics -and -not $res.PeakError
+    $dailyOk  = $DoMetrics -and -not $res.DailyError
+    $ptuOk    = $DoMetrics -and -not $res.PtuError
+    $raiOk    = $DoMetrics -and @($res.RaiSlots).Count -gt 0
     $acctDeps = [System.Collections.Generic.List[object]]::new()
     foreach ($d in @($res.Deployments)) {
         $m         = $d.properties.model
@@ -1218,10 +1780,31 @@ foreach ($acct in $modelHosts) {
         $skuName   = [string]$d.sku.name
         $upgrade   = [string]$d.properties.versionUpgradeOption
         $life      = Get-DeploymentLifecycle -Account $acct -ModelName $modelName -ModelVersion ([string]$m.version) -SkuName $skuName -UpgradeOption $upgrade
-        $u         = if ($usageOk) { $res.Usage[([string]$d.name).ToLowerInvariant()] } else { $null }
+        $dk        = ([string]$d.name).ToLowerInvariant()
+        $u         = if ($usageOk) { $res.Usage[$dk] } else { $null }
         # Provisioned (PTU) deployments and image / audio / video models carry no token rate limit: leave the cell blank.
         $tokenLimit = @($d.properties.rateLimits) | Where-Object { $_ -and $_.key -eq 'token' } | Select-Object -First 1
         $tpm       = if ($tokenLimit) { $tokenLimit.count } else { $null }
+        $isPtu     = $skuName -match '(?i)provisioned'
+        $created   = ConvertTo-UtcDateTime $d.systemData.createdAt
+        $peakTpm   = if ($peakOk) { [Math]::Round([double]$(if ($res.Peak.ContainsKey($dk)) { $res.Peak[$dk] } else { 0 }) / 60.0) } else { $null }
+        $daily     = if ($dailyOk) { $res.Daily[$dk] } else { $null }
+        $lastReq   = if ($daily) { $daily.Last } else { $null }
+        $idleDays  = if (-not $dailyOk) { $null }
+                     elseif ($lastReq) { [int][Math]::Max(0, [Math]::Floor(($TodayUtc - $lastReq.Date).TotalDays)) }
+                     elseif ($created) { [int][Math]::Max(0, [Math]::Min($IdleLookbackDays, [Math]::Floor(($RunStartedUtc - $created).TotalDays))) }
+                     else { $IdleLookbackDays }
+        $ptuAvg = $null; $ptuPeak = $null
+        if ($isPtu -and $ptuOk) {
+            $pt    = $res.Ptu[$dk]
+            $hours = if ($created -and $created -gt $UsageFromUtc) { [Math]::Max(1.0, ($UsageToUtc - $created).TotalHours) } else { $UsageHours }
+            $ptuAvg  = if ($pt) { [Math]::Min(1.0, $pt.Sum / $hours / 100.0) } else { 0.0 }
+            $ptuPeak = if ($pt) { [Math]::Min(1.0, $pt.Peak / 100.0) } else { 0.0 }
+        }
+        $quota    = Get-DeploymentQuota -Account $acct -ModelName $modelName -ModelVersion ([string]$m.version) -ModelFormat ([string]$m.format) -SkuName $skuName
+        $policy     = [string]$d.properties.raiPolicyName
+        $raiProfile = if ($policy) { $RaiProfiles['{0}|{1}' -f $acct.IdLower, $policy.ToLowerInvariant()] } else { $null }
+        $rai        = if ($raiOk) { $res.Rai[$dk] } else { $null }
         $rec = [pscustomobject]@{
             'Platform'           = $acct.Service.Name
             'Subscription'       = $acct.Subscription
@@ -1236,7 +1819,8 @@ foreach ($acct in $modelHosts) {
             'Capacity'           = $d.sku.capacity
             'Tokens per minute'  = $tpm
             'Version upgrade'    = $upgrade
-            'Content filter'     = [string]$d.properties.raiPolicyName
+            'Content filter'     = $(if ($policy) { $policy } else { '(not set)' })
+            'Content filter assessment' = $(if (-not $policy) { 'Not set' } elseif ($raiProfile) { $raiProfile.Assessment } elseif ($res.RaiError) { '' } else { 'Policy not found' })
             'Provisioning state' = [string]$d.properties.provisioningState
             'Lifecycle'          = $life.Lifecycle
             'Retirement date'    = $life.RetirementDate
@@ -1248,18 +1832,40 @@ foreach ($acct in $modelHosts) {
             'Output tokens'      = $(if ($hasOut) { if ($u) { $u.Out } else { 0 } } else { $null })
             'Total tokens'       = $(if ($hasTotal) { if ($u) { if ($slots -contains 'Total' -and $u.Total) { $u.Total } else { $u.In + $u.Out } } else { 0 } } else { $null })
             'Requests'           = $(if ($hasReq) { if ($u) { $u.Req } else { 0 } } else { $null })
+            'Peak TPM (busiest hour)'  = $peakTpm
+            'Peak % of TPM limit'      = $(if ($null -ne $peakTpm -and $tpm) { $peakTpm / [double]$tpm } else { $null })
+            'Throttled requests (429)' = $(if ($dailyOk) { if ($daily) { $daily.Throttled } else { 0 } } else { $null })
+            'PTU utilization avg'      = $ptuAvg
+            'PTU utilization peak'     = $ptuPeak
+            'Last request date'        = $(if ($lastReq) { $lastReq.Date } else { $null })
+            'Idle days'                = $idleDays
+            'Quota'                    = $(if ($quota) { [string]$quota.name.value } else { '' })
+            'Quota used %'             = $(if ($quota -and [double]$quota.limit -gt 0) { [double]$quota.currentValue / [double]$quota.limit } else { $null })
+            'Spillover deployment'     = [string]$d.properties.spilloverDeploymentName
+            'Right-sizing'             = ''
+            'Right-sizing advice'      = ''
             'Est. actual cost'    = $null
             'Est. amortized cost' = $null
             'Reservation name'   = ''
             'Currency'           = ''
-            'Created (UTC)'      = (ConvertTo-UtcDateTime $d.systemData.createdAt)
+            'Created (UTC)'      = $created
             'Created by'         = [string]$d.systemData.createdBy
             'Deployment ID'      = [string]$d.id
             '_AccountId'         = $acct.IdLower
             '_ModelKey'          = $modelName.ToLowerInvariant()
             '_Scope'             = (Get-SkuScope $skuName)
             '_Account'           = $acct
+            '_Quota'             = $quota
+            '_IsPtu'             = $isPtu
+            '_RaiProfile'        = $raiProfile
+            '_RaiTotal'          = $(if ($raiOk -and @($res.RaiSlots) -contains 'Total') { if ($rai) { $rai.Total } else { 0 } } else { $null })
+            '_RaiHarmful'        = $(if ($raiOk -and @($res.RaiSlots) -contains 'Harmful') { if ($rai) { $rai.Harmful } else { 0 } } else { $null })
+            '_RaiRejected'       = $(if ($raiOk -and @($res.RaiSlots) -contains 'Rejected') { if ($rai) { $rai.Rejected } else { 0 } } else { $null })
         }
+        $perUnit = if ($tpm -and $d.sku.capacity) { [double]$tpm / [double]$d.sku.capacity } else { 0 }
+        $rs = Get-RightSizing -Rec $rec -IsPtu $isPtu -PerUnit $perUnit -QuotaUsage $quota
+        $rec.'Right-sizing'        = $rs.Status
+        $rec.'Right-sizing advice' = $rs.Advice
         $acctDeps.Add($rec)
         $ModelHostDeployments.Add($rec)
     }
@@ -1324,20 +1930,23 @@ $costResourceTypes = @(
 
 function Invoke-CostQuery {
     # One Cost Management query (all pages); rows are returned as hashtables keyed by column name.
-    param([string]$Subscription, [string]$Type, [string[]]$Grouping, [string]$CostColumn)
+    # Default filter: the AI resource types. -Filter replaces it, -AllTypes removes it.
+    param([string]$Subscription, [string]$Type, [string[]]$Grouping, [string]$CostColumn, $Filter, [switch]$AllTypes)
+    $dataset = [ordered]@{
+        granularity = 'None'
+        aggregation = [ordered]@{
+            totalCost     = @{ name = $CostColumn; function = 'Sum' }
+            totalQuantity = @{ name = 'UsageQuantity'; function = 'Sum' }
+        }
+        grouping    = @($Grouping | ForEach-Object { @{ type = 'Dimension'; name = $_ } })
+    }
+    if ($Filter) { $dataset.filter = $Filter }
+    elseif (-not $AllTypes) { $dataset.filter = @{ dimensions = @{ name = 'ResourceType'; operator = 'In'; values = $costResourceTypes } } }
     $body = [ordered]@{
         type       = $Type
         timeframe  = 'Custom'
         timePeriod = [ordered]@{ from = $UsageFromUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'); to = $UsageToUtc.ToString('yyyy-MM-ddTHH:mm:ssZ') }
-        dataset    = [ordered]@{
-            granularity = 'None'
-            aggregation = [ordered]@{
-                totalCost     = @{ name = $CostColumn; function = 'Sum' }
-                totalQuantity = @{ name = 'UsageQuantity'; function = 'Sum' }
-            }
-            grouping    = @($Grouping | ForEach-Object { @{ type = 'Dimension'; name = $_ } })
-            filter      = @{ dimensions = @{ name = 'ResourceType'; operator = 'In'; values = $costResourceTypes } }
-        }
+        dataset    = $dataset
     } | ConvertTo-Json -Depth 10 -Compress
     $uri  = "/subscriptions/$Subscription/providers/Microsoft.CostManagement/query?api-version=2023-11-01"
     $rows = [System.Collections.Generic.List[object]]::new()
@@ -1543,18 +2152,207 @@ if ($DoCost) { Write-Host ("        {0} cost row(s) - actual {1}, amortized {2}"
 
 # Cost of resources that are not in the service tables (deleted during the window, or account kinds
 # outside the 23 services) is part of the totals only - say so, so that the table totals reconcile.
+# Every hub-based project is listed on the AI Hubs sheet, including projects whose hub is out of scope.
 $tableIds = [System.Collections.Generic.HashSet[string]]::new()
-foreach ($item in $Resources) { [void]$tableIds.Add($item.IdLower) }
-foreach ($hub in @($Resources | Where-Object { $_.ServiceKey -eq 'AIHubs' })) { foreach ($p in @($hub.Projects | Where-Object { $_ })) { [void]$tableIds.Add($p.IdLower) } }
+foreach ($item in @(@($Resources) + @($HubProjects))) { [void]$tableIds.Add($item.IdLower) }
 $outsideRows = @($CostRows | Where-Object { -not $tableIds.Contains((Get-TopLevelId $_.ResourceId)) })
 $outsideSum  = [double](($outsideRows | ForEach-Object { [Math]::Abs([double]$_.ActualCost) + [Math]::Abs([double]$_.AmortizedCost) } | Measure-Object -Sum).Sum)
+$OutsideActualByCurrency    = Get-CostByCurrency -Rows $outsideRows -Measure 'ActualCost'
+$OutsideAmortizedByCurrency = Get-CostByCurrency -Rows $outsideRows -Measure 'AmortizedCost'
+$OutsideCount = 0
 if ($outsideSum -ge 0.005) {
-    $outsideCount = @($outsideRows | ForEach-Object { Get-TopLevelId $_.ResourceId } | Sort-Object -Unique).Count
-    $outsideText  = 'Cost totals include {0} resource(s) that are not in the service tables (deleted during the window, or account kinds outside the 23 services): actual {1}, amortized {2}.' -f `
-        $outsideCount, (Format-CurrencyTotal -Map (Get-CostByCurrency -Rows $outsideRows -Measure 'ActualCost') -Available ([bool]$ActualOkSubs.Count)),
-        (Format-CurrencyTotal -Map (Get-CostByCurrency -Rows $outsideRows -Measure 'AmortizedCost') -Available ([bool]$AmortizedOkSubs.Count))
+    $OutsideCount = @($outsideRows | ForEach-Object { Get-TopLevelId $_.ResourceId } | Sort-Object -Unique).Count
+    $outsideText  = 'Cost totals include {0} resource(s) that are not in the service tables (deleted during the window, or account kinds outside the 23 services): actual {1}, amortized {2}. The AI services summary shows them on a separate line above the total.' -f `
+        $OutsideCount, (Format-CurrencyTotal -Map $OutsideActualByCurrency -Available ([bool]$ActualOkSubs.Count)),
+        (Format-CurrencyTotal -Map $OutsideAmortizedByCurrency -Available ([bool]$AmortizedOkSubs.Count))
     Add-Note $outsideText -Quiet
     Write-Host "        $outsideText"
+}
+
+# --- AI cost reconciliation: AI spend outside the AI resource types, and the subscription totals ---
+# Foundry account internal id (first 15 characters, no dashes) -> account. Partner models sold through
+# Azure Marketplace (e.g. Claude) are billed on SaaS resources named <offer>-<internal id prefix>-<32 hex>.
+$InternalIdIndex = @{}
+foreach ($c in $cogItems) {
+    $iid = ([string]$c.Raw.internalId -replace '-', '').ToLowerInvariant()
+    if ($iid.Length -ge 15) { $InternalIdIndex[$iid.Substring(0, 15)] = $c }
+}
+function Get-SaasAccount {
+    param([string]$Name)
+    if ($Name -match '-(?<iid>[0-9a-f]{15})-[0-9a-f]{32}$' -and $script:InternalIdIndex.ContainsKey($Matches['iid'])) { return $script:InternalIdIndex[$Matches['iid']] }
+    return $null
+}
+
+$ReconLines = [ordered]@{
+    'AI resources (service sheets)'          = 'Usage of the AI resources on the service sheets (a hub includes its projects). Amortized cost includes the share of the reservations (e.g. PTU) and savings plans the resources use.'
+    'AI resources not on the service sheets' = 'AI resource types (Cognitive Services, Machine Learning, AI Search, Bot Service) billed in the window but not on the service sheets: deleted during the window, or account kinds outside the 23 services.'
+    'AI reservation purchases'               = 'Purchases and refunds of AI reservations, e.g. provisioned throughput (PTU). Actual cost only - amortized cost spreads the purchase over the resources that use it (first line).'
+    'Unused AI reservations'                 = 'Unused hours of AI reservations. Amortized cost only - in actual cost they are part of the purchase.'
+    'Marketplace AI models'                  = 'Partner models sold through Azure Marketplace (e.g. Claude, Mistral), billed on Marketplace (SaaS) resources; linked to the Foundry resource when the resource name allows it.'
+    'Copilot Studio and Copilot meters'      = 'Copilot Studio pay-as-you-go billed on Power Platform billing policies, and other Copilot meters.'
+    'Other AI meters'                        = 'AI service meters (Foundry, Azure OpenAI, Cognitive Services, AI Search, Machine Learning, Bot Service) billed on other resource types.'
+}
+$ReconScanSubs = @(@($AiSubscriptions) + @($PowerPlatformSubs) + @($SubscriptionId) | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+$ReconOk       = @{ Actual = @{}; Amortized = @{} }   # measure -> subscription -> AI cost outside the AI resources read
+$TotalsOk      = @{ Actual = @{}; Amortized = @{} }   # measure -> subscription -> subscription total read
+$SubTotals     = @{}                                  # subscription|measure|currency -> total of all charges
+$reconRaw      = [System.Collections.Generic.List[object]]::new()
+if ($DoCost -and $ReconScanSubs.Count) {
+    $reconFilter = @{ or = @(
+            @{ dimensions = @{ name = 'ResourceType'; operator = 'In'; values = @('microsoft.powerplatform/accounts', 'microsoft.saas/resources') } },
+            @{ dimensions = @{ name = 'ChargeType'; operator = 'In'; values = @('Purchase', 'Refund', 'UnusedReservation', 'UnusedSavingsPlan') } },
+            @{ dimensions = @{ name = 'PublisherType'; operator = 'In'; values = @('Marketplace') } },
+            @{ dimensions = @{ name = 'MeterCategory'; operator = 'In'; values = @('Foundry Models', 'Foundry Tools', 'Azure OpenAI', 'Cognitive Services', 'Azure AI Services',
+                        'Azure Cognitive Search', 'Azure AI Search', 'Azure Bot Service', 'Machine Learning', 'Azure Machine Learning', 'Microsoft Copilot Studio', 'Copilot Studio') } }
+        ) }
+    $reconGrouping = 'ResourceId', 'ResourceType', 'MeterCategory', 'MeterSubCategory', 'ChargeType', 'PublisherType', 'ReservationName'
+    foreach ($sub in $ReconScanSubs) {
+        foreach ($m in 'Actual', 'Amortized') {
+            $col = 'Cost'
+            $q = Invoke-CostQuery -Subscription $sub -Type "${m}Cost" -Grouping $reconGrouping -CostColumn $col -Filter $reconFilter
+            if (-not $q.Ok -and $q.Status -eq 400 -and $q.Error -match '(?i)aggregat|column|pretaxcost') {
+                $col = 'PreTaxCost'
+                $q = Invoke-CostQuery -Subscription $sub -Type "${m}Cost" -Grouping $reconGrouping -CostColumn $col -Filter $reconFilter
+            }
+            if ($q.Ok) {
+                $ReconOk[$m][$sub] = $true
+                foreach ($x in $q.Rows) {
+                    $reconRaw.Add([pscustomobject]@{
+                            Measure = $m; SubscriptionId = $sub; ResourceId = ([string]$x['ResourceId']).ToLowerInvariant(); ResourceType = ([string]$x['ResourceType']).ToLowerInvariant()
+                            MeterCategory = [string]$x['MeterCategory']; MeterSubCategory = [string]$x['MeterSubCategory']; ChargeType = [string]$x['ChargeType']
+                            PublisherType = [string]$x['PublisherType']; ReservationName = [string]$x['ReservationName']; Cost = [double]$x[$col]; Currency = [string]$x['Currency']
+                        })
+                }
+            }
+            else { Add-Note ("AI cost outside the AI resources ({0} cost) unavailable for subscription '{1}': {2}" -f $m.ToLowerInvariant(), (Get-SubscriptionName $sub), $q.Error) }
+            $t = Invoke-CostQuery -Subscription $sub -Type "${m}Cost" -Grouping 'ChargeType' -CostColumn $col -AllTypes
+            if ($t.Ok) {
+                $TotalsOk[$m][$sub] = $true
+                foreach ($x in $t.Rows) {
+                    $tk = '{0}|{1}|{2}' -f $sub, $m, [string]$x['Currency']
+                    $SubTotals[$tk] = [double]$SubTotals[$tk] + [double]$x[$col]
+                }
+            }
+            else { Add-Note ("Subscription total ({0} cost) unavailable for subscription '{1}': {2}" -f $m.ToLowerInvariant(), (Get-SubscriptionName $sub), $t.Error) }
+        }
+    }
+}
+
+# Reservations bought for AI meters (e.g. PTU) or covering AI meters: their unused hours are AI spend too.
+# Reservations covering other meters of AI resources (e.g. VM reservations used by ML computes) are shared: not counted.
+$AiReservationNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($c in @($CostRows | Where-Object { $_.MeterCategory -match $AiMeterRegex })) { foreach ($n in ([string]$c.Reservation -split ';\s*')) { if ($n) { [void]$AiReservationNames.Add($n) } } }
+foreach ($x in $reconRaw) { if ($x.ChargeType -eq 'Purchase' -and $x.ReservationName -and $x.MeterCategory -match $AiMeterRegex) { [void]$AiReservationNames.Add($x.ReservationName) } }
+
+function Get-ReconLine {
+    param($Row)
+    if ("$($Row.MeterCategory) $($Row.MeterSubCategory)" -match '(?i)copilot') { return 'Copilot Studio and Copilot meters' }
+    if ($Row.ChargeType -in 'Purchase', 'Refund' -and $Row.MeterCategory -match $AiMeterRegex) { return 'AI reservation purchases' }
+    if ($Row.ChargeType -eq 'UnusedReservation' -and ($Row.MeterCategory -match $AiMeterRegex -or ($Row.ReservationName -and $AiReservationNames.Contains($Row.ReservationName)))) { return 'Unused AI reservations' }
+    if ($Row.ResourceType -eq 'microsoft.saas/resources' -or $Row.PublisherType -eq 'Marketplace') {
+        $name = Get-LastSegment $Row.ResourceId
+        if ("$($Row.MeterSubCategory) $($Row.MeterCategory) $name" -match $AiMarketplaceRegex -or (Get-SaasAccount $name)) { return 'Marketplace AI models' }
+        return $null
+    }
+    if ($Row.ChargeType -notlike 'Unused*' -and $Row.ChargeType -ne 'Purchase' -and $Row.MeterCategory -match $AiMeterRegex) { return 'Other AI meters' }
+    return $null
+}
+
+$ReconRows  = [System.Collections.Generic.List[object]]::new()   # classified AI cost outside the per-resource query
+$reconIndex = @{}
+foreach ($x in $reconRaw) {
+    # AI resource types are already in the per-resource cost (service sheets / not on the sheets).
+    if ($x.ResourceType -and $costResourceTypes -contains $x.ResourceType -and $CostOkSubs.ContainsKey($x.SubscriptionId)) { continue }
+    $line = if ($x.ResourceType -and $costResourceTypes -contains $x.ResourceType) { 'AI resources not on the service sheets' } else { Get-ReconLine $x }
+    if (-not $line) { continue }
+    $k = '{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}' -f $line, $x.SubscriptionId, $x.ResourceId, $x.ResourceType, $x.MeterCategory, $x.MeterSubCategory, $x.ChargeType, $x.PublisherType, $x.ReservationName, $x.Currency
+    if (-not $reconIndex.ContainsKey($k)) {
+        $linked = if ($line -eq 'Marketplace AI models') { Get-SaasAccount (Get-LastSegment $x.ResourceId) } else { $null }
+        $e = [pscustomobject]@{
+            Line = $line; SubscriptionId = $x.SubscriptionId; ResourceId = $x.ResourceId; ResourceType = $x.ResourceType
+            MeterCategory = $x.MeterCategory; MeterSubCategory = $x.MeterSubCategory; ChargeType = $x.ChargeType; PublisherType = $x.PublisherType
+            ReservationName = $x.ReservationName; Currency = $x.Currency; LinkedAccount = $linked
+            ActualCost    = $(if ($line -ne 'Unused AI reservations' -and $ReconOk.Actual.ContainsKey($x.SubscriptionId)) { 0.0 } else { $null })
+            AmortizedCost = $(if ($line -ne 'AI reservation purchases' -and $ReconOk.Amortized.ContainsKey($x.SubscriptionId)) { 0.0 } else { $null })
+        }
+        $reconIndex[$k] = $e
+        $ReconRows.Add($e)
+    }
+    $e = $reconIndex[$k]
+    if ($x.Measure -eq 'Actual' -and $null -ne $e.ActualCost) { $e.ActualCost += $x.Cost }
+    if ($x.Measure -eq 'Amortized' -and $null -ne $e.AmortizedCost) { $e.AmortizedCost += $x.Cost }
+}
+# Rows that net to zero in both datasets (e.g. free Marketplace plan purchases) carry no information.
+$ReconRows = [System.Collections.Generic.List[object]]@($ReconRows | Where-Object { [Math]::Abs([double]$_.ActualCost) -ge 0.005 -or [Math]::Abs([double]$_.AmortizedCost) -ge 0.005 })
+
+# Total AI spend by cost line (the source of the reconciliation tables and the Data_AISpend pivot sheet).
+$SpendIndex = [ordered]@{}
+function Add-SpendRow {
+    param([string]$Line, [string]$Item, [string]$Subscription, $Actual, $Amortized, [string]$Currency)
+    $k = '{0}|{1}|{2}|{3}' -f $Line, $Item, $Subscription, $Currency
+    if (-not $script:SpendIndex.Contains($k)) {
+        $script:SpendIndex[$k] = [pscustomobject]@{ 'Cost line' = $Line; 'Item' = $Item; 'Subscription' = (Get-SubscriptionName $Subscription); 'Actual cost' = $null; 'Amortized cost' = $null; 'Currency' = $Currency; '_Sub' = $Subscription }
+    }
+    $e = $script:SpendIndex[$k]
+    if ($null -ne $Actual) { $e.'Actual cost' = [double]$e.'Actual cost' + [double]$Actual }
+    if ($null -ne $Amortized) { $e.'Amortized cost' = [double]$e.'Amortized cost' + [double]$Amortized }
+}
+foreach ($c in $CostRows) {
+    $top = Get-TopLevelId $c.ResourceId
+    if ($tableIds.Contains($top)) {
+        $item  = $ResIndex[$top]
+        $label = if ($item -and $item.Service) { $item.Service.Name } else { 'AI resources' }
+        Add-SpendRow -Line 'AI resources (service sheets)' -Item $label -Subscription $c.SubscriptionId -Actual $c.ActualCost -Amortized $c.AmortizedCost -Currency $c.Currency
+    }
+    else { Add-SpendRow -Line 'AI resources not on the service sheets' -Item (Get-LastSegment $top) -Subscription $c.SubscriptionId -Actual $c.ActualCost -Amortized $c.AmortizedCost -Currency $c.Currency }
+}
+foreach ($x in $ReconRows) {
+    $name  = Get-LastSegment $x.ResourceId
+    $label = switch ($x.Line) {
+        'AI reservation purchases'          { if ($x.ReservationName) { $x.ReservationName } else { $x.MeterSubCategory } }
+        'Unused AI reservations'            { if ($x.ReservationName) { $x.ReservationName } else { $x.MeterSubCategory } }
+        'Marketplace AI models'             { if ($x.MeterSubCategory) { $x.MeterSubCategory } else { $name } }
+        'Copilot Studio and Copilot meters' { if ($name) { $name } else { $x.MeterSubCategory } }
+        default                             { '{0} ({1})' -f $(if ($name) { $name } else { '(no resource)' }), $x.MeterCategory }
+    }
+    Add-SpendRow -Line $x.Line -Item $label -Subscription $x.SubscriptionId -Actual $x.ActualCost -Amortized $x.AmortizedCost -Currency $x.Currency
+}
+$SpendRows = @($SpendIndex.Values | Sort-Object -Property @{ Expression = { @($ReconLines.Keys).IndexOf($_.'Cost line') } }, @{ Expression = { [double]$_.'Amortized cost' + [double]$_.'Actual cost' }; Descending = $true })
+
+$ReconAvailable = $DoCost -and ($ReconOk.Actual.Count -or $ReconOk.Amortized.Count)
+function Get-SubTotalByCurrency {
+    param([string]$Measure, [string[]]$Subscriptions)
+    $map = [ordered]@{}
+    foreach ($k in @($SubTotals.Keys | Sort-Object)) {
+        $p = $k.Split('|')
+        if ($p[1] -ne $Measure -or ($Subscriptions -and $Subscriptions -notcontains $p[0])) { continue }
+        $map[$p[2]] = [double]$map[$p[2]] + [double]$SubTotals[$k]
+    }
+    return $map
+}
+$AiSpendActual       = Get-CostByCurrency -Rows @($SpendRows | Select-Object @{ n = 'Currency'; e = { $_.Currency } }, @{ n = 'Cost'; e = { $_.'Actual cost' } }) -Measure 'Cost'
+$AiSpendAmortized    = Get-CostByCurrency -Rows @($SpendRows | Select-Object @{ n = 'Currency'; e = { $_.Currency } }, @{ n = 'Cost'; e = { $_.'Amortized cost' } }) -Measure 'Cost'
+$SubTotalActual      = Get-SubTotalByCurrency -Measure 'Actual'
+$SubTotalAmortized   = Get-SubTotalByCurrency -Measure 'Amortized'
+# Total AI spend of a measure needs both parts: the per-resource cost (when there are AI resources) and the
+# AI cost billed elsewhere. When either failed, the total is unknown - not the sum of the part that was read.
+$SpendOk = @{
+    Actual    = [bool]($ReconAvailable -and $ReconOk.Actual.Count -and (-not $AiSubscriptions.Count -or $ActualOkSubs.Count))
+    Amortized = [bool]($ReconAvailable -and $ReconOk.Amortized.Count -and (-not $AiSubscriptions.Count -or $AmortizedOkSubs.Count))
+}
+$AiSpendActualText    = Format-CurrencyTotal -Map $AiSpendActual -Available $SpendOk.Actual
+$AiSpendAmortizedText = Format-CurrencyTotal -Map $AiSpendAmortized -Available $SpendOk.Amortized
+function Get-AiShare {
+    param($AiMap, $TotalMap)
+    if (@($TotalMap.Keys).Count -ne 1 -or @($AiMap.Keys | Where-Object { $_ -notin $TotalMap.Keys }).Count) { return $null }
+    $cur = @($TotalMap.Keys)[0]
+    if ([double]$TotalMap[$cur] -le 0) { return $null }
+    return [double]$AiMap[$cur] / [double]$TotalMap[$cur]
+}
+$AiShareActual    = if ($SpendOk.Actual) { Get-AiShare $AiSpendActual $SubTotalActual } else { $null }
+$AiShareAmortized = if ($SpendOk.Amortized) { Get-AiShare $AiSpendAmortized $SubTotalAmortized } else { $null }
+if ($ReconAvailable) {
+    Write-Host ("        Total AI spend - actual {0}, amortized {1} ({2} subscription(s) scanned)" -f $AiSpendActualText, $AiSpendAmortizedText, $ReconScanSubs.Count)
 }
 
 #endregion
@@ -1726,9 +2524,12 @@ if ($AiSubscriptions.Count) {
             })
         if ([string]$first.eventSubType -eq 'Retirement') {
             $rd = Get-DateFromText "$title $summary"
+            # Name the services the way the rest of the workbook does, so the Summary counts them per service.
+            $catalogNames = Join-Unique @(@($grp | ForEach-Object { @($_.impact) | Where-Object { $_ } | ForEach-Object { Get-CatalogServiceName ([string]$_.ImpactedService) } }) +
+                @($impacted | Where-Object { $_ } | ForEach-Object { $_.Service.Name }))
             $HealthRetirementRows.Add([pscustomobject]@{
                     'Source'             = 'Azure Service Health'
-                    'Service'            = $services
+                    'Service'            = $(if ($catalogNames) { $catalogNames } else { $services })
                     'Subscription'       = $subNames
                     'Resource group'     = ''
                     'Resource'           = $impactedNames
@@ -1813,6 +2614,7 @@ function Format-PlanExtensions {
 }
 
 $PlanRows       = [System.Collections.Generic.List[object]]::new()
+$DefenderAiBySub = @{}   # subscription -> Defender for AI services plan state
 $AssessmentRows = @()
 $AlertRows      = @()
 if ($AiSubscriptions.Count) {
@@ -1824,6 +2626,7 @@ if ($AiSubscriptions.Count) {
         $ai        = $pricing["$sub|ai"]
         $cspm      = $pricing["$sub|cloudposture"]
         $aiState   = Get-PlanState $ai
+        $DefenderAiBySub[$sub] = $aiState
         $cspmState = Get-PlanState $cspm
         $actions   = @()
         if ($aiState -eq 'Off (Free)') { $actions += 'Enable Microsoft Defender for AI services (threat protection for AI workloads).' }
@@ -2140,9 +2943,12 @@ $MlDeploymentRecords = @(foreach ($e in @($MlEndpoints | Where-Object { $_.Kind 
     })
 
 $DeploymentColumns = @('Platform', 'Subscription', 'Resource group', 'Account', 'Region', 'Deployment', 'Model', 'Model version',
-    'Model format', 'Deployment type', 'Capacity', 'Tokens per minute', 'Version upgrade', 'Content filter', 'Provisioning state',
+    'Model format', 'Deployment type', 'Capacity', 'Tokens per minute', 'Version upgrade', 'Content filter', 'Content filter assessment', 'Provisioning state',
     'Lifecycle', 'Retirement date', 'Days to retirement', 'Retirement risk', 'Retirement impact', 'Suggested upgrade',
-    'Input tokens', 'Output tokens', 'Total tokens', 'Requests', 'Est. actual cost', 'Est. amortized cost', 'Reservation name', 'Currency',
+    'Input tokens', 'Output tokens', 'Total tokens', 'Requests',
+    'Peak TPM (busiest hour)', 'Peak % of TPM limit', 'Throttled requests (429)', 'PTU utilization avg', 'PTU utilization peak',
+    'Last request date', 'Idle days', 'Quota', 'Quota used %', 'Spillover deployment', 'Right-sizing', 'Right-sizing advice',
+    'Est. actual cost', 'Est. amortized cost', 'Reservation name', 'Currency',
     'Created (UTC)', 'Created by', 'Deployment ID')
 $DataDeployments = @(@($ModelHostDeployments) + @($MlDeploymentRecords) | Where-Object { $_ } | Select-Object -Property $DeploymentColumns)
 
@@ -2416,6 +3222,13 @@ function Get-ServiceRows {
 }
 
 # --- Flat pivot sources + summary ---
+function Get-WithProjects {
+    # A hub row carries the figures of its hub-based projects, as it does for cost.
+    param($Item, [string]$Property)
+    if ($null -eq $Item.$Property) { return $null }
+    if ($Item.ServiceKey -ne 'AIHubs') { return $Item.$Property }
+    return [int]$Item.$Property + [int]((@($Item.Projects | Where-Object { $_ } | ForEach-Object { [int]$_.$Property }) + 0 | Measure-Object -Sum).Sum)
+}
 $DataResources = @(foreach ($i in $Resources) {
         [pscustomobject]@{
             'Group'                   = $i.Service.Group
@@ -2432,16 +3245,21 @@ $DataResources = @(foreach ($i in $Resources) {
             'Amortized cost'          = $(if ($null -ne $i.AmortizedCost) { $i.AmortizedCost + [double]$i.ProjectsAmortizedCost } else { $null })
             'Reservation name'        = $(if ($i.Reservation) { $i.Reservation } else { '(none)' })
             'Currency'                = $(if ($i.Currency) { $i.Currency } else { '(none)' })
-            'Advisor recommendations' = $i.AdvisorCount
-            'Defender unhealthy'      = $i.DefenderUnhealthy
+            'Advisor recommendations' = (Get-WithProjects $i 'AdvisorCount')
+            'Defender unhealthy'      = (Get-WithProjects $i 'DefenderUnhealthy')
             'Resource ID'             = $i.Id
         }
     })
 
 $retireCountByService = @{}
-foreach ($x in $RetirementRows) { $retireCountByService[[string]$x.Service] = 1 + [int]$retireCountByService[[string]$x.Service] }
+foreach ($x in $RetirementRows) {
+    # A Service Health advisory can name several services: it counts once for each of them.
+    foreach ($n in @(([string]$x.Service) -split ',\s*' | Where-Object { $_ } | Sort-Object -Unique)) { $retireCountByService[$n] = 1 + [int]$retireCountByService[$n] }
+}
 $SummaryRows = @(foreach ($svc in $ServiceCatalog) {
         $items = @($Resources | Where-Object { $_.ServiceKey -eq $svc.Key })
+        # Hub-based projects are listed on the AI Hubs sheet: their cost, recommendations and findings belong to that service.
+        $rollup = @(if ($svc.Key -eq 'AIHubs') { @($items) + @($HubProjects) } else { $items })
         $deps = switch ($svc.Key) {
             'Foundry'         { @($ModelHostDeployments | Where-Object { $_.Platform -eq $svc.Name }).Count }
             'AzureOpenAI'     { @($ModelHostDeployments | Where-Object { $_.Platform -eq $svc.Name }).Count }
@@ -2449,14 +3267,14 @@ $SummaryRows = @(foreach ($svc in $ServiceCatalog) {
             'MachineLearning' { @($MlDeploymentRecords | Where-Object { $_.Platform -eq 'Machine Learning' }).Count }
             default           { $null }
         }
-        $costItems      = @($items | Where-Object { $null -ne $_.ActualCost -or $null -ne $_.AmortizedCost })
+        $costItems      = @($rollup | Where-Object { $null -ne $_.ActualCost -or $null -ne $_.AmortizedCost })
         # Zero amounts do not make a currency mix; only sum a service when its costs share one currency.
-        $costCurrencies = @($costItems | Where-Object { ([double]$_.ActualCost + [double]$_.AmortizedCost + [double]$_.ProjectsActualCost + [double]$_.ProjectsAmortizedCost) -ne 0 } |
+        $costCurrencies = @($costItems | Where-Object { ([double]$_.ActualCost + [double]$_.AmortizedCost) -ne 0 } |
             ForEach-Object { $_.Currency } | Where-Object { $_ } | Sort-Object -Unique)
         if ($costCurrencies.Count -eq 0) { $costCurrencies = @($costItems | ForEach-Object { $_.Currency } | Where-Object { $_ } | Sort-Object -Unique | Select-Object -First 1) }
         $singleCurrency = $costCurrencies.Count -le 1
-        $actualItems    = @($items | Where-Object { $null -ne $_.ActualCost })
-        $amortizedItems = @($items | Where-Object { $null -ne $_.AmortizedCost })
+        $actualItems    = @($rollup | Where-Object { $null -ne $_.ActualCost })
+        $amortizedItems = @($rollup | Where-Object { $null -ne $_.AmortizedCost })
         [pscustomobject]@{
             'Service'                 = $svc.Name
             'Group'                   = $svc.Group
@@ -2464,16 +3282,597 @@ $SummaryRows = @(foreach ($svc in $ServiceCatalog) {
             'Regions'                 = @($items | ForEach-Object { $_.Region } | Sort-Object -Unique).Count
             'Subscriptions'           = @($items | ForEach-Object { $_.SubscriptionId } | Sort-Object -Unique).Count
             'Model deployments'       = $deps
-            'Actual cost'             = $(if ($actualItems.Count -and $singleCurrency) { [double](($actualItems | ForEach-Object { $_.ActualCost + [double]$_.ProjectsActualCost } | Measure-Object -Sum).Sum) } else { $null })
-            'Amortized cost'          = $(if ($amortizedItems.Count -and $singleCurrency) { [double](($amortizedItems | ForEach-Object { $_.AmortizedCost + [double]$_.ProjectsAmortizedCost } | Measure-Object -Sum).Sum) } else { $null })
-            'Reservation name'        = (Join-Unique @($items | ForEach-Object { ([string]$_.Reservation) -split ';\s*' }) '; ')
+            'Actual cost'             = $(if ($actualItems.Count -and $singleCurrency) { [double](($actualItems | ForEach-Object { [double]$_.ActualCost } | Measure-Object -Sum).Sum) } else { $null })
+            'Amortized cost'          = $(if ($amortizedItems.Count -and $singleCurrency) { [double](($amortizedItems | ForEach-Object { [double]$_.AmortizedCost } | Measure-Object -Sum).Sum) } else { $null })
+            'Reservation name'        = (Join-Unique @($rollup | ForEach-Object { ([string]$_.Reservation) -split ';\s*' }) '; ')
             'Currency'                = $(if (-not $singleCurrency) { 'mixed - see sheet' } elseif ($costCurrencies.Count) { $costCurrencies[0] } else { '' })
-            'Advisor recommendations' = $(if ($AdvisorOk) { [int](($items | Measure-Object -Property AdvisorCount -Sum).Sum) } else { $null })
-            'Defender unhealthy'      = $(if ($AssessmentsOk) { [int](($items | Measure-Object -Property DefenderUnhealthy -Sum).Sum) } else { $null })
+            'Advisor recommendations' = $(if ($AdvisorOk) { [int](($rollup | Measure-Object -Property AdvisorCount -Sum).Sum) } else { $null })
+            'Defender unhealthy'      = $(if ($AssessmentsOk) { [int](($rollup | Measure-Object -Property DefenderUnhealthy -Sum).Sum) } else { $null })
             'Retirement items'        = [int]$retireCountByService[$svc.Name]
             'Sheet'                   = $svc.Sheet
         }
     })
+# What the KPI tiles count but no service row can hold: cost of resources not on the service sheets,
+# subscription-level Advisor recommendations and retirement items that name no service of the catalog.
+$catalogNameSet = @{}
+foreach ($svc in $ServiceCatalog) { $catalogNameSet[$svc.Name] = $true }
+$UnattributedAdvisor     = @($AdvisorRows | Where-Object { $_.Service -eq '(subscription)' }).Count
+$UnattributedRetirements = @($RetirementRows | Where-Object { -not @(([string]$_.Service) -split ',\s*' | Where-Object { $catalogNameSet.ContainsKey($_) }).Count }).Count
+
+# --- Security hygiene: one row per primary AI resource --------------------------------------------
+function Get-CallerType {
+    param([string]$Caller)
+    if ($Caller -match '@') { return 'User' }
+    if ($Caller -match '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { return 'App' }
+    return 'Other'
+}
+
+function Get-DiagnosticProfile {
+    # 'All logs' = the allLogs category group, or every log category listed on the settings enabled.
+    param($Settings)
+    $enabledCats   = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $listedCats    = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $enabledGroups = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $metrics = $false
+    $dest    = [System.Collections.Generic.List[string]]::new()
+    $list    = @($Settings | Where-Object { $_ })
+    foreach ($s in $list) {
+        $p = $s.properties
+        foreach ($l in @($p.logs | Where-Object { $_ })) {
+            $on = "$($l.enabled)" -eq 'True'
+            if ($l.category) {
+                [void]$listedCats.Add([string]$l.category)
+                if ($on) { [void]$enabledCats.Add([string]$l.category) }
+            }
+            elseif ($l.categoryGroup -and $on) { [void]$enabledGroups.Add([string]$l.categoryGroup) }
+        }
+        foreach ($m in @($p.metrics | Where-Object { $_ })) { if ("$($m.enabled)" -eq 'True') { $metrics = $true } }
+        if ($p.workspaceId)                 { $dest.Add('Log Analytics') }
+        if ($p.storageAccountId)            { $dest.Add('Storage account') }
+        if ($p.eventHubAuthorizationRuleId) { $dest.Add('Event Hub') }
+        if ($p.marketplacePartnerId)        { $dest.Add('Partner solution') }
+    }
+    $status = if ($list.Count -eq 0) { 'None' }
+              elseif ($enabledGroups.Contains('allLogs') -or ($listedCats.Count -gt 0 -and $enabledCats.Count -eq $listedCats.Count)) { 'All logs' }
+              elseif ($enabledCats.Count -or $enabledGroups.Count) { 'Partial' }
+              elseif ($metrics) { 'Metrics only' }
+              else { 'None' }
+    [pscustomobject]@{
+        Settings     = $list.Count
+        Status       = $status
+        Categories   = (Join-Unique (@($enabledGroups) + @($enabledCats)))
+        Destinations = (Join-Unique @($dest))
+    }
+}
+
+function Get-ResourceLock {
+    # Strongest management lock that applies to the resource: on the resource, its resource group or its subscription.
+    param($Item)
+    if (-not $LocksBySub.ContainsKey($Item.SubscriptionId)) { return $null }
+    $rg   = ('/subscriptions/{0}/resourcegroups/{1}' -f $Item.SubscriptionId, $Item.ResourceGroup).ToLowerInvariant()
+    $sub  = ('/subscriptions/{0}' -f $Item.SubscriptionId).ToLowerInvariant()
+    $best = $null
+    foreach ($l in @($LocksBySub[$Item.SubscriptionId] | Where-Object { $_ })) {
+        $lid = ([string]$l.id).ToLowerInvariant()
+        $at  = $lid.IndexOf('/providers/microsoft.authorization/locks/')
+        if ($at -lt 0) { continue }
+        $scope = $lid.Substring(0, $at)
+        $label = if ($scope -eq $Item.IdLower) { 'Resource' } elseif ($scope -eq $rg) { 'Resource group' } elseif ($scope -eq $sub) { 'Subscription' } else { $null }
+        if (-not $label) { continue }
+        $level = [string]$l.properties.level
+        $rank  = if ($level -eq 'ReadOnly') { 2 } else { 1 }
+        if (-not $best -or $rank -gt $best.Rank) { $best = @{ Level = $level; Scope = $label; Rank = $rank } }
+    }
+    if (-not $best) { return [pscustomobject]@{ Level = 'None'; Scope = '' } }
+    return [pscustomobject]@{ Level = $best.Level; Scope = $best.Scope }
+}
+
+$NotRotatedText = "Not rotated (last $ActivityDays days)"
+$hygiene = foreach ($i in $Resources) {
+    $r      = $i.Raw
+    $family = $i.Service.Family
+    $isMl   = $family -in 'ML', 'MLHub'
+    # Machine Learning workspaces have no local auth switch: their key-based access is the datastore credential mode.
+    $localAuth = if ($isMl) { if ([string]$r.systemDatastoresAuthMode -eq 'identity') { 'Disabled' } else { 'Enabled' } }
+                 elseif ([bool]$r.disableLocalAuth) { 'Disabled' } else { 'Enabled' }
+
+    # Key activity from the activity log; a hub includes its projects.
+    $hubChildren = if ($family -eq 'MLHub') { @($i.Projects | Where-Object { $_ -and $_.IdLower }) } else { @() }
+    $acts = @(@($KeyActivity[$i.IdLower]) + @($hubChildren | ForEach-Object { $KeyActivity[$_.IdLower] }) | Where-Object { $_ })
+    $activityRead = $DoActivityLog -and $ActivityOk.ContainsKey(('{0}|{1}' -f $i.SubscriptionId, ($i.Type -split '/')[0]))
+    $retrievals = $null; $callers = $null; $callerTypes = ''; $lastGet = $null; $regens = $null; $lastRegen = $null; $rotation = ''
+    if ($activityRead) {
+        $retrievals  = [int](($acts | ForEach-Object { $_.Retrievals } | Measure-Object -Sum).Sum)
+        $regens      = [int](($acts | ForEach-Object { $_.Regenerations } | Measure-Object -Sum).Sum)
+        $callerSet   = @($acts | ForEach-Object { $_.Callers.Keys } | Where-Object { $_ } | Sort-Object -Unique)
+        $callers     = $callerSet.Count
+        $callerTypes = (@($callerSet | Group-Object -Property { Get-CallerType $_ } | Sort-Object -Property Name | ForEach-Object { '{0} {1}' -f $_.Name, $_.Count }) -join '; ')
+        $lastGet     = $acts | ForEach-Object { $_.LastRetrieval } | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
+        $lastRegen   = $acts | ForEach-Object { $_.LastRegeneration } | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
+        $rotation    = if ($localAuth -eq 'Disabled') { 'n/a (keys disabled)' } elseif ($regens -gt 0) { 'Rotated' } else { $NotRotatedText }
+    }
+
+    $diag = if ($DiagByRes.ContainsKey($i.IdLower)) { Get-DiagnosticProfile $DiagByRes[$i.IdLower] } else { $null }
+    $lock = Get-ResourceLock $i
+    $pna  = Get-PublicAccess ([string]$r.publicNetworkAccess)
+    $exposure = if ($pna -eq 'Disabled') { 'Private only' }
+                elseif ($pna -eq 'SecuredByPerimeter') { 'Network security perimeter' }
+                elseif (($family -eq 'Cognitive' -and [string]$r.networkDefaultAction -eq 'Deny') -or ($family -eq 'Search' -and [int]$r.ipRules -gt 0)) { 'Selected networks' }
+                else { 'All networks' }
+    $identity   = if ($family -eq 'Bot') { 'n/a' } else { Get-IdentityLabel ([string]$r.identityType) }
+    $encryption = switch ($family) {
+        'Cognitive' { if ($r.encryptionKeySource -eq 'Microsoft.KeyVault') { 'Customer-managed key' } else { 'Microsoft-managed key' } }
+        'Search'    { if ([string]$r.cmkEnforcement -eq 'Enabled') { 'Customer-managed key (enforced)' } else { 'Microsoft-managed key' } }
+        'Bot'       { if ([bool]$r.isCmekEnabled) { 'Customer-managed key' } else { 'Microsoft-managed key' } }
+        default     { if ($r.encryptionStatus -eq 'Enabled') { 'Customer-managed key' } else { 'Microsoft-managed key' } }
+    }
+    # Defender for AI services protects model deployments (Azure OpenAI and Foundry accounts).
+    $defender = if ($family -eq 'Cognitive' -and $i.Kind -in 'OpenAI', 'AIServices') {
+                    if ($DefenderAiBySub.ContainsKey($i.SubscriptionId)) { $DefenderAiBySub[$i.SubscriptionId] } else { 'Unknown' }
+                } else { 'n/a' }
+
+    $findings = [System.Collections.Generic.List[string]]::new()
+    if ($localAuth -eq 'Enabled') { $findings.Add($(if ($isMl) { 'Datastores use storage account keys' } else { 'Local (key) authentication enabled' })) }
+    if ($rotation -eq $NotRotatedText) { $findings.Add("Keys not rotated in the last $ActivityDays days") }
+    if ($diag -and $diag.Status -in 'None', 'Metrics only') { $findings.Add('No diagnostic logs') }
+    if ($lock -and $lock.Level -eq 'None') { $findings.Add('No resource lock') }
+    if ($exposure -eq 'All networks') { $findings.Add('Reachable from all networks') }
+    if ($identity -eq 'None') { $findings.Add('No managed identity') }
+    if ($defender -eq 'Off (Free)') { $findings.Add('Defender for AI services off') }
+
+    [pscustomobject]@{
+        'Issues'                      = $findings.Count
+        'Findings'                    = ($findings -join '; ')
+        'Service'                     = $i.Service.Name
+        'Resource'                    = $i.Name
+        'Subscription'                = $i.Subscription
+        'Resource group'              = $i.ResourceGroup
+        'Region'                      = $i.Region
+        'Local auth (keys)'           = $localAuth
+        'Key retrievals'              = $retrievals
+        'Key retrieval callers'       = $callers
+        'Caller types'                = $callerTypes
+        'Last key retrieval (UTC)'    = $lastGet
+        'Key regenerations'           = $regens
+        'Last key regeneration (UTC)' = $lastRegen
+        'Key rotation'                = $rotation
+        'Diagnostic settings'         = $(if ($diag) { $diag.Settings } else { $null })
+        'Diagnostic logs'             = $(if ($diag) { $diag.Status } else { '' })
+        'Log categories enabled'      = $(if ($diag) { $diag.Categories } else { '' })
+        'Diagnostic destinations'     = $(if ($diag) { $diag.Destinations } else { '' })
+        'Resource lock'               = $(if ($lock) { $lock.Level } else { '' })
+        'Lock scope'                  = $(if ($lock) { $lock.Scope } else { '' })
+        'Network exposure'            = $exposure
+        'Private endpoints'           = [int]$r.privateEndpoints
+        'Managed identity'            = $identity
+        'Encryption'                  = $encryption
+        'Defender for AI services'    = $defender
+        'Resource ID'                 = $i.Id
+        'Portal'                      = (Get-PortalLink $i.Id)
+    }
+}
+$HygieneRows = @($hygiene | Sort-Object -Property @{ Expression = 'Issues'; Descending = $true }, 'Service', 'Resource')
+
+# --- Content filters: policies and the filter of every model deployment -----------------------------
+$depsByPolicy = @{}   # account id|policy (lower-case) -> deployments using it
+foreach ($d in $ModelHostDeployments) {
+    if (-not $d._RaiProfile) { continue }
+    $k = '{0}|{1}' -f $d._AccountId, ([string]$d.'Content filter').ToLowerInvariant()
+    if (-not $depsByPolicy.ContainsKey($k)) { $depsByPolicy[$k] = [System.Collections.Generic.List[object]]::new() }
+    $depsByPolicy[$k].Add($d)
+}
+$assessRank = @{ 'Relaxed' = 0; 'Not set' = 1; 'Policy not found' = 2; 'Stricter' = 3; 'Default' = 4 }
+$policies = foreach ($acct in $modelHosts) {
+    $res = $AcctResults[$acct.IdLower]
+    if (-not $res) { continue }
+    foreach ($p in @($res.RaiPolicies | Where-Object { $_ -and $_.name })) {
+        $k    = '{0}|{1}' -f $acct.IdLower, ([string]$p.name).ToLowerInvariant()
+        $prof = $RaiProfiles[$k]
+        if (-not $prof) { continue }
+        $used = @($depsByPolicy[$k] | Where-Object { $_ })
+        # System policies are listed only where a deployment uses them.
+        if ($prof.Type -eq 'System' -and -not $used.Count) { continue }
+        [pscustomobject]@{
+            'Assessment'                   = $prof.Assessment
+            'Account'                      = $acct.Name
+            'Subscription'                 = $acct.Subscription
+            'Policy'                       = $prof.Name
+            'Policy type'                  = $prof.Type
+            'Base policy'                  = $prof.BasePolicy
+            'Mode'                         = $prof.Mode
+            'Hate'                         = $prof.Hate
+            'Sexual'                       = $prof.Sexual
+            'Violence'                     = $prof.Violence
+            'Self-harm'                    = $prof.SelfHarm
+            'Prompt shields (jailbreak)'   = $prof.Jailbreak
+            'Indirect attacks'             = $prof.IndirectAttack
+            'Protected material (text)'    = $prof.ProtectedText
+            'Protected material (code)'    = $prof.ProtectedCode
+            'Profanity'                    = $prof.Profanity
+            'Custom blocklists'            = $prof.Blocklists
+            'Relaxed vs DefaultV2'         = $prof.Relaxed
+            'Stricter vs DefaultV2'        = $prof.Stricter
+            'Deployments using the policy' = $used.Count
+            'Deployment names'             = (Join-Unique @($used | ForEach-Object { $_.Deployment }))
+        }
+    }
+}
+$PolicyRows = @($policies | Sort-Object -Property @{ Expression = { $assessRank[$_.Assessment] } }, 'Account', 'Policy')
+
+$FilterDeploymentRows = @($ModelHostDeployments | ForEach-Object {
+        $total    = $_._RaiTotal
+        $rejected = $_._RaiRejected
+        [pscustomobject]@{
+            'Content filter assessment'  = $_.'Content filter assessment'
+            'Account'                    = $_.Account
+            'Subscription'               = $_.Subscription
+            'Region'                     = $_.Region
+            'Deployment'                 = $_.Deployment
+            'Model'                      = $_.Model
+            'Model version'              = $_.'Model version'
+            'Deployment type'            = $_.'Deployment type'
+            'Content filter'             = $_.'Content filter'
+            'Policy type'                = $(if ($_._RaiProfile) { $_._RaiProfile.Type } else { '' })
+            'Requests screened'          = $total
+            'Harmful requests detected'  = $_._RaiHarmful
+            'Blocked requests'           = $rejected
+            'Blocked %'                  = $(if ($null -ne $total -and [double]$total -gt 0 -and $null -ne $rejected) { [double]$rejected / [double]$total } else { $null })
+            'Defender for AI services'   = $(if ($DefenderAiBySub.ContainsKey($_._Account.SubscriptionId)) { $DefenderAiBySub[$_._Account.SubscriptionId] } else { 'Unknown' })
+            'Deployment ID'              = $_.'Deployment ID'
+        }
+    } | Sort-Object -Property @{ Expression = { if ($assessRank.ContainsKey($_.'Content filter assessment')) { $assessRank[$_.'Content filter assessment'] } else { 9 } } }, 'Account', 'Deployment')
+
+# --- Capacity and quota ---------------------------------------------------------------------------------
+# Every Foundry / Azure OpenAI deployment, right-sizing candidates first.
+$rightRank = @{ 'Idle' = 0; 'Throttled' = 1; 'PTU saturated' = 2; 'PTU under-used' = 3; 'Over-allocated' = 4; 'New' = 5; 'OK' = 6 }
+$RightSizingCandidates = @($ModelHostDeployments | Where-Object { $rightRank.ContainsKey([string]$_.'Right-sizing') -and $rightRank[[string]$_.'Right-sizing'] -le 4 }).Count
+$RightSizingRows = @($ModelHostDeployments |
+    Sort-Object -Property @{ Expression = { if ($rightRank.ContainsKey([string]$_.'Right-sizing')) { $rightRank[[string]$_.'Right-sizing'] } else { 9 } } }, @{ Expression = { [double]$_.'Est. amortized cost' }; Descending = $true }, 'Account', 'Deployment' |
+    ForEach-Object {
+        [pscustomobject]@{
+            'Right-sizing'             = $(if ($_.'Right-sizing') { $_.'Right-sizing' } else { 'Not assessed' })
+            'Right-sizing advice'      = $_.'Right-sizing advice'
+            'Account'                  = $_.Account
+            'Deployment'               = $_.Deployment
+            'Model'                    = $_.Model
+            'Model version'            = $_.'Model version'
+            'Deployment type'          = $_.'Deployment type'
+            'Capacity'                 = $_.Capacity
+            'Tokens per minute'        = $_.'Tokens per minute'
+            'Peak TPM (busiest hour)'  = $_.'Peak TPM (busiest hour)'
+            'Peak % of TPM limit'      = $_.'Peak % of TPM limit'
+            'Requests'                 = $_.Requests
+            'Throttled requests (429)' = $_.'Throttled requests (429)'
+            'PTU utilization avg'      = $_.'PTU utilization avg'
+            'PTU utilization peak'     = $_.'PTU utilization peak'
+            'Last request date'        = $_.'Last request date'
+            'Idle days'                = $_.'Idle days'
+            'Quota'                    = $_.Quota
+            'Quota used %'             = $_.'Quota used %'
+            'Spillover deployment'     = $_.'Spillover deployment'
+            'Est. actual cost'         = $_.'Est. actual cost'
+            'Est. amortized cost'      = $_.'Est. amortized cost'
+            'Currency'                 = $_.Currency
+            'Subscription'             = $_.Subscription
+            'Region'                   = $_.Region
+            'Deployment ID'            = $_.'Deployment ID'
+        }
+    })
+
+$depsByQuota = @{}   # sub|region|usage name (lower-case) -> deployments consuming it
+foreach ($d in $ModelHostDeployments) {
+    if (-not $d._Quota) { continue }
+    $k = '{0}|{1}|{2}' -f $d._Account.SubscriptionId, $d._Account.Location, ([string]$d._Quota.name.value).ToLowerInvariant()
+    if (-not $depsByQuota.ContainsKey($k)) { $depsByQuota[$k] = [System.Collections.Generic.List[object]]::new() }
+    $depsByQuota[$k].Add($d)
+}
+$quotas = foreach ($pair in @($QuotaByPair.Keys | Sort-Object)) {
+    $sub, $loc = $pair.Split('|')
+    foreach ($u in @($QuotaByPair[$pair])) {
+        $name  = [string]$u.name.value
+        $deps  = @($depsByQuota[('{0}|{1}' -f $pair, $name.ToLowerInvariant())] | Where-Object { $_ })
+        $used  = [double]$u.currentValue
+        $limit = [double]$u.limit
+        # Only quotas in use or consumed by a deployment; the usages API lists every model the region offers.
+        if ($used -le 0 -and -not $deps.Count) { continue }
+        $parts = $name.Split('.')
+        $type  = if ($name -match '(?i)accountcount$') { '' } elseif ($parts.Count -ge 2) { $parts[1] } else { '' }
+        $model = if ($name -match '(?i)accountcount$') { '(accounts)' } elseif ($parts.Count -ge 3) { $parts[2..($parts.Count - 1)] -join '.' } elseif ($parts.Count -eq 2) { '(all models)' } else { $name }
+        $idle  = @($deps | Where-Object { $_.'Right-sizing' -eq 'Idle' })
+        $pct   = if ($limit -gt 0) { $used / $limit } else { $null }
+        [pscustomobject]@{
+            'Quota status'                      = $(if ($null -eq $pct) { '' } elseif ($pct -ge 1) { 'Full' } elseif ($pct -ge 0.8) { 'High' } else { 'OK' })
+            'Subscription'                      = (Get-SubscriptionName $sub)
+            'Region'                            = (Get-RegionName $loc)
+            'Quota'                             = $name
+            'Deployment type'                   = $type
+            'Model'                             = $model
+            'Used'                              = $used
+            'Limit'                             = $limit
+            'Available'                         = [Math]::Max(0, $limit - $used)
+            'Used %'                            = $pct
+            'Deployments'                       = $deps.Count
+            'Idle deployments'                  = $idle.Count
+            'Capacity held by idle deployments' = [double](($idle | ForEach-Object { [double]$_.Capacity } | Measure-Object -Sum).Sum)
+            'Deployment names'                  = (Join-Unique @($deps | ForEach-Object { '{0}/{1}' -f $_.Account, $_.Deployment }) '; ')
+        }
+    }
+}
+$QuotaRows = @($quotas | Sort-Object -Property @{ Expression = { [double]$_.'Used %' }; Descending = $true }, 'Subscription', 'Region', 'Quota')
+$QuotaHighCount = @($QuotaRows | Where-Object { $null -ne $_.'Used %' -and $_.'Used %' -ge 0.9 }).Count
+
+# --- Machine Learning computes, workspace dependencies and workspace cost -------------------------------
+function ConvertFrom-IsoDuration {
+    param([string]$Text)
+    if (-not $Text) { return $null }
+    try { return [System.Xml.XmlConvert]::ToTimeSpan($Text) } catch { return $null }
+}
+
+$seenComputes = [System.Collections.Generic.HashSet[string]]::new()
+$computes = foreach ($wsId in @($ComputesByWs.Keys | Sort-Object)) {
+    $ws = $ResIndex[$wsId]
+    foreach ($c in @($ComputesByWs[$wsId] | Where-Object { $_ -and $_.id })) {
+        if (-not $seenComputes.Add(([string]$c.id).ToLowerInvariant())) { continue }
+        $cp    = $c.properties
+        $pp    = $cp.properties
+        $type  = [string]$cp.computeType
+        $isCi  = $type -eq 'ComputeInstance'
+        $isAml = $type -eq 'AmlCompute'
+        $idle  = ConvertFrom-IsoDuration ([string]$pp.idleTimeBeforeShutdown)
+        $stops = @(@($pp.schedules.computeStartStop) | Where-Object { $_ -and [string]$_.action -eq 'Stop' -and [string]$_.status -ne 'Disabled' })
+        $auto  = if (-not $isCi) { 'n/a' }
+                 elseif ($idle -and $stops.Count) { 'Idle shutdown + schedule' }
+                 elseif ($idle) { 'Idle shutdown' }
+                 elseif ($stops.Count) { 'Stop schedule' }
+                 else { 'None' }
+        $minNodes = if ($isAml -and $null -ne $pp.scaleSettings.minNodeCount) { [int]$pp.scaleSettings.minNodeCount } else { $null }
+        $maxNodes = if ($isAml -and $null -ne $pp.scaleSettings.maxNodeCount) { [int]$pp.scaleSettings.maxNodeCount } else { $null }
+        $publicIp = if ($null -ne $pp.enableNodePublicIp) { [bool]$pp.enableNodePublicIp } elseif ($pp.connectivityEndpoints.publicIpAddress) { $true } else { $null }
+        $ssh      = if ($isCi) { [string]$pp.sshSettings.sshPublicAccess } elseif ($isAml) { [string]$pp.remoteLoginPortPublicAccess } else { '' }
+        $state    = if ($isCi) { [string]$pp.state } elseif ($isAml) { [string]$pp.allocationState } else { [string]$cp.provisioningState }
+        $findings = [System.Collections.Generic.List[string]]::new()
+        if ($auto -eq 'None') { $findings.Add('No idle shutdown or stop schedule') }
+        if ($isAml -and $minNodes -gt 0) { $findings.Add("$minNodes node(s) always on (minimum nodes > 0)") }
+        if ($publicIp -eq $true) { $findings.Add('Public IP address') }
+        if ($ssh -eq 'Enabled') { $findings.Add('SSH / remote login open to the internet') }
+        if ($null -ne $cp.disableLocalAuth -and -not [bool]$cp.disableLocalAuth) { $findings.Add('Local authentication enabled') }
+        [pscustomobject]@{
+            'Issues'              = $findings.Count
+            'Findings'            = ($findings -join '; ')
+            'Workspace'           = $(if ($ws) { $ws.Name } else { Get-LastSegment $wsId })
+            'Workspace kind'      = $(if ($ws -and $ws.Kind) { $ws.Kind } else { 'Default' })
+            'Compute'             = [string]$c.name
+            'Type'                = $(if ($type) { $type } else { '(unknown)' })
+            'VM size'             = [string]$pp.vmSize
+            'Priority'            = [string]$pp.vmPriority
+            'State'               = $state
+            'Current nodes'       = $(if ($isAml) { $pp.currentNodeCount } else { $null })
+            'Min nodes'           = $minNodes
+            'Max nodes'           = $maxNodes
+            'Idle shutdown (min)' = $(if ($idle) { [int]$idle.TotalMinutes } else { $null })
+            'Stop schedules'      = $stops.Count
+            'Auto-shutdown'       = $auto
+            'Public IP'           = $publicIp
+            'SSH public access'   = $ssh
+            'Local auth disabled' = $(if ($null -ne $cp.disableLocalAuth) { [bool]$cp.disableLocalAuth } else { $null })
+            'Subnet'              = (Get-LastSegment ([string]$pp.subnet.id))
+            'Region'              = (Get-RegionName ([string]$c.location))
+            'Subscription'        = $(if ($ws) { $ws.Subscription } else { '' })
+            'Resource group'      = $(if ($ws) { $ws.ResourceGroup } else { '' })
+            'Created (UTC)'       = (ConvertTo-UtcDateTime $cp.createdOn)
+            'Resource ID'         = [string]$c.id
+        }
+    }
+}
+$ComputeRows = @($computes | Sort-Object -Property @{ Expression = 'Issues'; Descending = $true }, 'Workspace', 'Compute')
+$ComputeIssueCount = @($ComputeRows | Where-Object { $_.Issues -gt 0 }).Count
+
+$depKinds = [ordered]@{ storageAccount = 'Storage account'; keyVault = 'Key vault'; containerRegistry = 'Container registry'; applicationInsights = 'Application Insights' }
+$depUse = [ordered]@{}   # lower-case dependency id -> kind + workspaces using it
+foreach ($w in $MlWorkspaces) {
+    foreach ($prop in $depKinds.Keys) {
+        $id = [string]$w.Raw.$prop
+        if (-not $id) { continue }
+        $k = $id.ToLowerInvariant()
+        if (-not $depUse.Contains($k)) { $depUse[$k] = [pscustomobject]@{ Id = $id; Kind = $depKinds[$prop]; Workspaces = [System.Collections.Generic.List[string]]::new() } }
+        $depUse[$k].Workspaces.Add($w.Name)
+    }
+}
+$dependencies = foreach ($k in $depUse.Keys) {
+    $u    = $depUse[$k]
+    $info = $DependencyInfo[$k]
+    $findings = [System.Collections.Generic.List[string]]::new()
+    $pna = $keyAccess = $purge = $soft = $perm = $blob = $tls = $defaultAction = ''
+    if ($info) {
+        $pna           = Get-PublicAccess ([string]$info.publicNetworkAccess)
+        $defaultAction = if ($info.networkDefaultAction) { [string]$info.networkDefaultAction } else { 'Allow' }
+        switch ($u.Kind) {
+            'Storage account' {
+                $keyAccess = if ([string]$info.allowSharedKeyAccess -eq 'false') { 'Disabled' } else { 'Enabled' }
+                $blob      = if ([string]$info.allowBlobPublicAccess -eq 'true') { 'Allowed' } elseif ([string]$info.allowBlobPublicAccess -eq 'false') { 'Disabled' } else { '(not set)' }
+                $tls       = [string]$info.minimumTlsVersion
+                if ($keyAccess -eq 'Enabled') { $findings.Add('Shared key access enabled') }
+                if ($blob -eq 'Allowed') { $findings.Add('Anonymous blob access allowed') }
+                if ($tls -in 'TLS1_0', 'TLS1_1') { $findings.Add("Minimum TLS $tls") }
+            }
+            'Key vault' {
+                $purge = if ([string]$info.enablePurgeProtection -eq 'true') { 'On' } else { 'Off' }
+                $soft  = if ([string]$info.enableSoftDelete -eq 'false') { 'Off' } else { 'On' }
+                $perm  = if ([string]$info.enableRbacAuthorization -eq 'true') { 'Azure RBAC' } else { 'Access policies' }
+                if ($purge -eq 'Off') { $findings.Add('Purge protection off') }
+                if ($soft -eq 'Off') { $findings.Add('Soft delete off') }
+                if ($perm -eq 'Access policies') { $findings.Add('Vault access policies instead of Azure RBAC') }
+            }
+            'Container registry' {
+                $keyAccess = if ([string]$info.adminUserEnabled -eq 'true') { 'Enabled' } else { 'Disabled' }
+                if ($keyAccess -eq 'Enabled') { $findings.Add('Admin user enabled') }
+            }
+            'Application Insights' {
+                $keyAccess = if ([string]$info.disableLocalAuth -eq 'true') { 'Disabled' } else { 'Enabled' }
+                $pna       = if ([string]$info.ingestionAccess) { [string]$info.ingestionAccess } else { 'Enabled' }
+                $defaultAction = ''
+                if ($keyAccess -eq 'Enabled') { $findings.Add('Local (instrumentation key) authentication enabled') }
+                if (-not $info.workspaceResourceId) { $findings.Add('Classic Application Insights (not workspace-based)') }
+            }
+        }
+        if ($u.Kind -ne 'Application Insights' -and $pna -eq 'Enabled' -and $defaultAction -ne 'Deny' -and [int]$info.privateEndpoints -eq 0) { $findings.Add('Reachable from all networks') }
+    }
+    else { $findings.Add('Not found (deleted, or not readable with the current access)') }
+    [pscustomobject]@{
+        'Issues'                 = $findings.Count
+        'Findings'               = ($findings -join '; ')
+        'Dependency'             = $u.Kind
+        'Name'                   = (Get-LastSegment $u.Id)
+        'Used by workspaces'     = (Join-Unique @($u.Workspaces))
+        'Found'                  = $(if ($info) { 'Yes' } else { 'Missing' })
+        'SKU'                    = $(if ($info) { [string]$info.skuName } else { '' })
+        'Public network access'  = $pna
+        'Network default action' = $defaultAction
+        'Private endpoints'      = $(if ($info) { [int]$info.privateEndpoints } else { $null })
+        'Key-based access'       = $keyAccess
+        'Purge protection'       = $purge
+        'Soft delete'            = $soft
+        'Permission model'       = $perm
+        'Blob anonymous access'  = $blob
+        'Minimum TLS'            = $tls
+        'Subscription'           = $(if ($info) { Get-SubscriptionName ([string]$info.subscriptionId) } else { Get-SubscriptionName (($u.Id -split '/')[2]) })
+        'Resource group'         = $(if ($info) { [string]$info.resourceGroup } else { ($u.Id -split '/')[4] })
+        'Resource ID'            = $u.Id
+    }
+}
+$DependencyRows = @($dependencies | Sort-Object -Property @{ Expression = 'Issues'; Descending = $true }, 'Dependency', 'Name')
+
+$mlIds = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($w in $MlWorkspaces) { [void]$mlIds.Add($w.IdLower) }
+$mlCost = [ordered]@{}
+foreach ($c in $CostRows) {
+    $top = Get-TopLevelId $c.ResourceId
+    if (-not $mlIds.Contains($top)) { continue }
+    $k = '{0}|{1}|{2}' -f $top, $c.MeterCategory, $c.Currency
+    if (-not $mlCost.Contains($k)) { $mlCost[$k] = [pscustomobject]@{ Top = $top; MeterCategory = $c.MeterCategory; Currency = $c.Currency; Rows = [System.Collections.Generic.List[object]]::new() } }
+    $mlCost[$k].Rows.Add($c)
+}
+$MlCostRows = @($mlCost.Values | ForEach-Object {
+        $e  = $_
+        $ws = $ResIndex[$e.Top]
+        [pscustomobject]@{
+            'Workspace'        = $(if ($ws) { $ws.Name } else { Get-LastSegment $e.Top })
+            'Workspace kind'   = $(if ($ws -and $ws.Kind) { $ws.Kind } else { 'Default' })
+            'Hub'              = $(if ($ws -and $ws.Hub) { $ws.Hub.Name } else { '' })
+            'Meter category'   = $(if ($e.MeterCategory) { $e.MeterCategory } else { '(none)' })
+            'Actual cost'      = $(if ($ActualOkSubs.ContainsKey($e.Rows[0].SubscriptionId)) { [double](($e.Rows | ForEach-Object { [double]$_.ActualCost } | Measure-Object -Sum).Sum) } else { $null })
+            'Amortized cost'   = $(if ($AmortizedOkSubs.ContainsKey($e.Rows[0].SubscriptionId)) { [double](($e.Rows | ForEach-Object { [double]$_.AmortizedCost } | Measure-Object -Sum).Sum) } else { $null })
+            'Reservation name' = (Join-Unique @($e.Rows | ForEach-Object { ([string]$_.Reservation) -split ';\s*' }) '; ')
+            'Currency'         = $e.Currency
+            'Subscription'     = $(if ($ws) { $ws.Subscription } else { Get-SubscriptionName $e.Rows[0].SubscriptionId })
+            'Resource group'   = $(if ($ws) { $ws.ResourceGroup } else { '' })
+        }
+    } | Where-Object { [Math]::Abs([double]$_.'Actual cost') -ge 0.005 -or [Math]::Abs([double]$_.'Amortized cost') -ge 0.005 } |
+    Sort-Object -Property 'Workspace', @{ Expression = { [double]$_.'Amortized cost' + [double]$_.'Actual cost' }; Descending = $true })
+
+# --- AI cost reconciliation -------------------------------------------------------------------------------
+$ReconCurrencies = @(@($SpendRows | ForEach-Object { $_.Currency }) + @($SubTotals.Keys | ForEach-Object { $_.Split('|')[2] }) | Where-Object { $_ } | Sort-Object -Unique)
+$ReconLineRows = [System.Collections.Generic.List[object]]::new()
+foreach ($cur in $ReconCurrencies) {
+    foreach ($line in $ReconLines.Keys) {
+        $rows  = @($SpendRows | Where-Object { $_.'Cost line' -eq $line -and $_.Currency -eq $cur })
+        $isRes = $line -in 'AI resources (service sheets)', 'AI resources not on the service sheets'
+        $okA   = if ($line -eq 'Unused AI reservations') { $false } elseif ($isRes) { $ActualOkSubs.Count -gt 0 } else { $ReconOk.Actual.Count -gt 0 }
+        $okM   = if ($line -eq 'AI reservation purchases') { $false } elseif ($isRes) { $AmortizedOkSubs.Count -gt 0 } else { $ReconOk.Amortized.Count -gt 0 }
+        $ReconLineRows.Add([pscustomobject]@{
+                'Cost line'           = $line
+                'Actual cost'         = $(if ($okA) { [double](($rows | ForEach-Object { [double]$_.'Actual cost' } | Measure-Object -Sum).Sum) } else { $null })
+                'Amortized cost'      = $(if ($okM) { [double](($rows | ForEach-Object { [double]$_.'Amortized cost' } | Measure-Object -Sum).Sum) } else { $null })
+                'Currency'            = $cur
+                'Share of actual'     = $null
+                'Share of amortized'  = $null
+                'What it covers'      = $ReconLines[$line]
+            })
+    }
+    # Totals, non-AI spend and the shares are Excel formulas (filled in when the sheet is written).
+    $ReconLineRows.Add([pscustomobject]@{ 'Cost line' = 'Total AI spend'; 'Actual cost' = $null; 'Amortized cost' = $null; 'Currency' = $cur; 'Share of actual' = $null; 'Share of amortized' = $null
+            'What it covers' = 'Sum of the lines above.' })
+    $ReconLineRows.Add([pscustomobject]@{ 'Cost line' = 'Subscription total (all charges)'
+            'Actual cost'    = $(if ($TotalsOk.Actual.Count) { [double]$SubTotalActual[$cur] } else { $null })
+            'Amortized cost' = $(if ($TotalsOk.Amortized.Count) { [double]$SubTotalAmortized[$cur] } else { $null })
+            'Currency' = $cur; 'Share of actual' = $null; 'Share of amortized' = $null
+            'What it covers' = "All charges of the $($ReconScanSubs.Count) scanned subscription(s): subscriptions with AI resources, subscriptions with Power Platform billing policies (Copilot Studio) and the -SubscriptionId list." })
+    $ReconLineRows.Add([pscustomobject]@{ 'Cost line' = 'Non-AI spend'; 'Actual cost' = $null; 'Amortized cost' = $null; 'Currency' = $cur; 'Share of actual' = $null; 'Share of amortized' = $null
+            'What it covers' = 'Subscription total minus total AI spend.' })
+}
+
+$reconSubs = [ordered]@{}
+foreach ($x in $SpendRows) { $reconSubs[('{0}|{1}' -f ([string]$x._Sub).ToLowerInvariant(), $x.Currency)] = $true }
+foreach ($k in $SubTotals.Keys) { $p = $k.Split('|'); $reconSubs[('{0}|{1}' -f $p[0].ToLowerInvariant(), $p[2])] = $true }
+$ReconSubRows = @(foreach ($k in @($reconSubs.Keys | Sort-Object)) {
+        $sub, $cur = $k.Split('|')
+        $rows = @($SpendRows | Where-Object { ([string]$_._Sub).ToLowerInvariant() -eq $sub -and $_.Currency -eq $cur })
+        # Each part has its own query: a part that could not be read stays blank (and so do the total and share).
+        # Subscriptions without AI resources have no per-resource query: their AI resource types come with the other AI cost.
+        $aiSub  = $AiSubSet.ContainsKey($sub)
+        $okResA = if ($aiSub) { $ActualOkSubs.ContainsKey($sub) } else { $ReconOk.Actual.ContainsKey($sub) }
+        $okResM = if ($aiSub) { $AmortizedOkSubs.ContainsKey($sub) } else { $ReconOk.Amortized.ContainsKey($sub) }
+        $okOthA = $ReconOk.Actual.ContainsKey($sub)
+        $okOthM = $ReconOk.Amortized.ContainsKey($sub)
+        [pscustomobject]@{
+            'Subscription'                = (Get-SubscriptionName $sub)
+            'AI resources actual cost'    = $(if ($okResA) { [double](($rows | Where-Object { $_.'Cost line' -like 'AI resources*' } | ForEach-Object { [double]$_.'Actual cost' } | Measure-Object -Sum).Sum) } else { $null })
+            'Other AI actual cost'        = $(if ($okOthA) { [double](($rows | Where-Object { $_.'Cost line' -notlike 'AI resources*' } | ForEach-Object { [double]$_.'Actual cost' } | Measure-Object -Sum).Sum) } else { $null })
+            'Total AI actual cost'        = $null
+            'Subscription actual cost'    = $(if ($TotalsOk.Actual.ContainsKey($sub)) { [double]$SubTotals[('{0}|Actual|{1}' -f $sub, $cur)] } else { $null })
+            'AI share (actual)'           = $null
+            'AI resources amortized cost' = $(if ($okResM) { [double](($rows | Where-Object { $_.'Cost line' -like 'AI resources*' } | ForEach-Object { [double]$_.'Amortized cost' } | Measure-Object -Sum).Sum) } else { $null })
+            'Other AI amortized cost'     = $(if ($okOthM) { [double](($rows | Where-Object { $_.'Cost line' -notlike 'AI resources*' } | ForEach-Object { [double]$_.'Amortized cost' } | Measure-Object -Sum).Sum) } else { $null })
+            'Total AI amortized cost'     = $null
+            'Subscription amortized cost' = $(if ($TotalsOk.Amortized.ContainsKey($sub)) { [double]$SubTotals[('{0}|Amortized|{1}' -f $sub, $cur)] } else { $null })
+            'AI share (amortized)'        = $null
+            'Currency'                    = $cur
+            'Subscription ID'             = $sub
+        }
+    })
+
+$detail = [ordered]@{}
+foreach ($c in $outsideRows) {
+    $top = Get-TopLevelId $c.ResourceId
+    $k   = '{0}|{1}|{2}|{3}' -f $top, $c.MeterCategory, $c.MeterSubCategory, $c.Currency
+    if (-not $detail.Contains($k)) {
+        $detail[$k] = [pscustomobject]@{
+            'Cost line' = 'AI resources not on the service sheets'; 'Subscription' = (Get-SubscriptionName $c.SubscriptionId); 'Resource' = (Get-LastSegment $top)
+            'Linked AI resource' = ''; 'Resource type' = (($top -split '/providers/')[-1] -replace '/[^/]+$', ''); 'Meter category' = $c.MeterCategory
+            'Meter sub-category' = $c.MeterSubCategory; 'Charge type' = 'Usage'; 'Publisher type' = 'Azure'; 'Reservation name' = ''
+            'Actual cost' = $null; 'Amortized cost' = $null; 'Currency' = $c.Currency; 'Resource ID' = $top
+        }
+    }
+    $e = $detail[$k]
+    if ($null -ne $c.ActualCost) { $e.'Actual cost' = [double]$e.'Actual cost' + [double]$c.ActualCost }
+    if ($null -ne $c.AmortizedCost) { $e.'Amortized cost' = [double]$e.'Amortized cost' + [double]$c.AmortizedCost }
+    if ($c.Reservation) { $e.'Reservation name' = Join-Unique @(@($e.'Reservation name' -split ';\s*') + @($c.Reservation -split ';\s*')) '; ' }
+}
+$ReconDetailRows = @(@($detail.Values) + @($ReconRows | ForEach-Object {
+            [pscustomobject]@{
+                'Cost line'          = $_.Line
+                'Subscription'       = (Get-SubscriptionName $_.SubscriptionId)
+                'Resource'           = $(if ($_.ResourceId) { Get-LastSegment $_.ResourceId } else { '(no resource)' })
+                'Linked AI resource' = $(if ($_.LinkedAccount) { $_.LinkedAccount.Name } else { '' })
+                'Resource type'      = $_.ResourceType
+                'Meter category'     = $_.MeterCategory
+                'Meter sub-category' = $_.MeterSubCategory
+                'Charge type'        = $_.ChargeType
+                'Publisher type'     = $_.PublisherType
+                'Reservation name'   = $_.ReservationName
+                'Actual cost'        = $_.ActualCost
+                'Amortized cost'     = $_.AmortizedCost
+                'Currency'           = $_.Currency
+                'Resource ID'        = $_.ResourceId
+            }
+        }) | Where-Object { [Math]::Abs([double]$_.'Actual cost') -ge 0.005 -or [Math]::Abs([double]$_.'Amortized cost') -ge 0.005 } |
+    Sort-Object -Property @{ Expression = { @($ReconLines.Keys).IndexOf($_.'Cost line') } }, @{ Expression = { [double]$_.'Amortized cost' + [double]$_.'Actual cost' }; Descending = $true })
+
+$LocalAuthCount   = @($HygieneRows | Where-Object { $_.'Local auth (keys)' -eq 'Enabled' }).Count
+$NoDiagLogsCount  = @($HygieneRows | Where-Object { $_.'Diagnostic logs' -in 'None', 'Metrics only' }).Count
+$KeyRetrievalSum  = if ($ActivityOk.Count) { [int](($HygieneRows | ForEach-Object { [int]$_.'Key retrievals' } | Measure-Object -Sum).Sum) } else { $null }
+$RelaxedCount     = @($PolicyRows | Where-Object { $_.Assessment -eq 'Relaxed' }).Count
+$FilterNotSetCount = @($FilterDeploymentRows | Where-Object { $_.'Content filter assessment' -eq 'Not set' }).Count
 
 #endregion
 
@@ -2491,10 +3890,11 @@ function Get-ColumnFormat {
     param([string]$Header)
     if ($Header -match '\(UTC\)$') { return 'yyyy-mm-dd hh:mm' }
     if ($Header -match '(?i)date$') { return 'yyyy-mm-dd' }
+    if ($Header -match '(?i)%|utilization|\bshare\b') { return '0.0%' }
     if ($Header -match '(?i)(^|\s)cost$|^cost') { return '#,##0.00##' }
     if ($Header -eq 'Quantity') { return '#,##0.######' }
-    if ($Header -match '(?i)tokens|requests|calls|capacity') { return '#,##0' }
-    if ($Header -match '(?i)^days') { return '0' }
+    if ($Header -match '(?i)tokens|requests|calls|capacity|tpm|retrievals|regenerations' -or $Header -in 'Used', 'Limit', 'Available') { return '#,##0' }
+    if ($Header -match '(?i)^days|days$') { return '0' }
     return $null
 }
 
@@ -2510,6 +3910,23 @@ $HighlightRules = @{
     'Local auth disabled'      = @(, @('FALSE', '#FFF2CC'))
     'Defender for AI services' = @(@('Off (Free)', '#F8CBAD'), @('On (Standard)', '#C6EFCE'))
     'Defender CSPM'            = @(@('Off (Free)', '#F8CBAD'), @('On (Standard)', '#C6EFCE'))
+    'Right-sizing'             = @(@('Idle', '#F8CBAD'), @('Throttled', '#F8CBAD'), @('PTU saturated', '#F8CBAD'), @('Over-allocated', '#FFE699'), @('PTU under-used', '#FFE699'), @('OK', '#C6EFCE'))
+    'Assessment'               = @(@('Relaxed', '#F8CBAD'), @('Stricter', '#C6EFCE'))
+    'Content filter assessment' = @(@('Relaxed', '#F8CBAD'), @('Not set', '#FFE699'), @('Policy not found', '#FFE699'), @('Stricter', '#C6EFCE'))
+    'Quota status'             = @(@('Full', '#F8CBAD'), @('High', '#FFE699'))
+    'Local auth (keys)'        = @(, @('Enabled', '#FFE699'))
+    'Key rotation'             = @(, @($NotRotatedText, '#FFE699'))
+    'Diagnostic logs'          = @(@('None', '#F8CBAD'), @('Metrics only', '#F8CBAD'), @('Partial', '#FFF2CC'), @('All logs', '#C6EFCE'))
+    'Resource lock'            = @(, @('None', '#FFF2CC'))
+    'Network exposure'         = @(, @('All networks', '#FFE699'))
+    'Managed identity'         = @(, @('None', '#FFF2CC'))
+    'Found'                    = @(, @('Missing', '#F8CBAD'))
+    'Auto-shutdown'            = @(, @('None', '#F8CBAD'))
+    'Public IP'                = @(, @('TRUE', '#FFE699'))
+    'SSH public access'        = @(, @('Enabled', '#F8CBAD'))
+    'Key-based access'         = @(, @('Enabled', '#FFF2CC'))
+    'Purge protection'         = @(, @('Off', '#FFE699'))
+    'Soft delete'              = @(, @('Off', '#F8CBAD'))
 }
 
 function Add-CellHighlight {
@@ -2654,6 +4071,41 @@ function Write-Kpi {
     $box.Style.Border.BorderAround([OfficeOpenXml.Style.ExcelBorderStyle]::Thin, (ConvertTo-Color '#9DC3E6'))
 }
 
+function Get-TextWidth {
+    # Approximate width of single-line text in Excel column units (1 unit = one Calibri 11 digit), scaled
+    # by font size and weight. Works without GDI+ (e.g. PowerShell on Linux / Cloud Shell).
+    param([string]$Text, [double]$Size = 11, [switch]$Bold)
+    $units = 0.0
+    foreach ($ch in $Text.ToCharArray()) {
+        $units += if ('.,:;''!|()[]{} ijltfrI-/'.IndexOf($ch) -ge 0) { 0.6 }
+                  elseif ('mwMW@%'.IndexOf($ch) -ge 0) { 1.6 }
+                  elseif ([char]::IsUpper($ch)) { 1.25 }
+                  else { 1.0 }
+    }
+    return $units * $Size / 11 * $(if ($Bold) { 1.1 } else { 1.0 })
+}
+
+function Resize-ColumnToFit {
+    # Widens (never narrows) the columns of the given ranges so that every single-line value fits: Excel
+    # shows a number that does not fit as "#####". Wrapped and merged cells are ignored.
+    param([OfficeOpenXml.ExcelWorksheet]$Ws, [string[]]$Address, [double]$MaxWidth = 60)
+    $need = @{}
+    foreach ($a in $Address) {
+        foreach ($cell in $Ws.Cells[$a]) {
+            if ($cell.Merge -or $cell.Style.WrapText) { continue }
+            $text = $cell.Text
+            if ([string]::IsNullOrEmpty($text)) { continue }
+            $w   = (Get-TextWidth -Text $text -Size $cell.Style.Font.Size -Bold:$cell.Style.Font.Bold) + 2
+            $col = $cell.Start.Column
+            if ($w -gt [double]$need[$col]) { $need[$col] = $w }
+        }
+    }
+    foreach ($col in @($need.Keys)) {
+        $w = [Math]::Min($MaxWidth, [Math]::Ceiling($need[$col]))
+        if ($Ws.Column($col).Width -lt $w) { $Ws.Column($col).Width = $w }
+    }
+}
+
 function Set-PivotSortByValue {
     # EPPlus 4.5 only sorts pivot items by label; inject an autoSortScope so Excel sorts the row
     # field descending by the first data field when it refreshes the pivot table.
@@ -2694,6 +4146,8 @@ function Get-DistinctCount {
 
 function Add-PivotBlock {
     # Pivot table at column B with its pivot chart to the right. Returns the number of rows used.
+    # EPPlus 4.5 writes the source sheet name and column headers into the pivot cache XML unescaped:
+    # keep '&', '<' and '"' out of pivot source sheet names and headers.
     param(
         [OfficeOpenXml.ExcelWorksheet]$Ws, [int]$Row, [string]$Name, [string]$Title, [string]$Subtitle,
         $Source, [string[]]$RowFields, [string[]]$ColumnFields = @(), [object[]]$DataFields,
@@ -2713,6 +4167,9 @@ function Add-PivotBlock {
         $s.Style.Font.Color.SetColor((ConvertTo-Color '#7F7F7F'))
     }
     $pt = $Ws.PivotTables.Add($Ws.Cells[($Row + 2), 2], $Source, $Name)
+    # Turn off "Autofit column widths on update": the pivots are stacked in shared columns, so each refresh
+    # (including the refresh on open) would fit the columns to that pivot only and show '#####' in the others.
+    $pt.UseAutoFormatting = $false
     foreach ($f in $RowFields) { $null = $pt.RowFields.Add($pt.Fields[$f]) }
     foreach ($f in $ColumnFields) { $null = $pt.ColumnFields.Add($pt.Fields[$f]) }
     foreach ($d in $DataFields) {
@@ -2762,6 +4219,7 @@ $pkg = Open-ExcelPackage -Path $OutputPath -Create
 $wb  = $pkg.Workbook
 
 # Sheet order: Summary, Visuals, Recommendations, Service Retirements, Service Health, Security Best Practices,
+# Security Hygiene, Content Filters, Capacity and Quota, AI Cost Reconciliation, ML Compute and Dependencies,
 # 23 service sheets, hidden data sheets.
 $wsSummary = $wb.Worksheets.Add('Summary')
 $wsVisuals = $wb.Worksheets.Add('Visuals')
@@ -2769,19 +4227,30 @@ $wsReco    = $wb.Worksheets.Add('Recommendations')
 $wsRetire  = $wb.Worksheets.Add('Service Retirements')
 $wsHealth  = $wb.Worksheets.Add('Service Health')
 $wsSec     = $wb.Worksheets.Add('Security Best Practices')
+$wsHyg     = $wb.Worksheets.Add('Security Hygiene')
+$wsFilter  = $wb.Worksheets.Add('Content Filters')
+$wsCap     = $wb.Worksheets.Add('Capacity and Quota')
+$wsRecon   = $wb.Worksheets.Add('AI Cost Reconciliation')
+$wsMl      = $wb.Worksheets.Add('ML Compute and Dependencies')
 foreach ($svc in $ServiceCatalog) {
     $w = $wb.Worksheets.Add($svc.Sheet)
     $w.TabColor = ConvertTo-Color $(if ($svc.Group -eq $G1) { '#7030A0' } elseif ($svc.Group -eq $G2) { '#2E75B6' } else { '#7F7F7F' })
 }
-$wsDataRes  = $wb.Worksheets.Add('Data_Resources')
-$wsDataDep  = $wb.Worksheets.Add('Data_Deployments')
-$wsDataCost = $wb.Worksheets.Add('Data_ModelCost')
+$wsDataRes   = $wb.Worksheets.Add('Data_Resources')
+$wsDataDep   = $wb.Worksheets.Add('Data_Deployments')
+$wsDataCost  = $wb.Worksheets.Add('Data_ModelCost')
+$wsDataSpend = $wb.Worksheets.Add('Data_AISpend')
 $wsSummary.TabColor = ConvertTo-Color '#1F4E79'
 $wsVisuals.TabColor = ConvertTo-Color '#4472C4'
 $wsReco.TabColor    = ConvertTo-Color '#C55A11'
 $wsRetire.TabColor  = ConvertTo-Color '#BF8F00'
 $wsHealth.TabColor  = ConvertTo-Color '#548235'
 $wsSec.TabColor     = ConvertTo-Color '#C00000'
+$wsHyg.TabColor     = ConvertTo-Color '#C00000'
+$wsFilter.TabColor  = ConvertTo-Color '#C00000'
+$wsCap.TabColor     = ConvertTo-Color '#0070C0'
+$wsRecon.TabColor   = ConvertTo-Color '#00B050'
+$wsMl.TabColor      = ConvertTo-Color '#0070C0'
 
 $failedText    = 'INCOMPLETE - the query failed (see Data collection notes on the Summary sheet); rows shown are partial.'
 $generatedText = 'Generated {0:yyyy-MM-dd HH:mm} UTC.' -f $RunStartedUtc
@@ -2808,7 +4277,7 @@ $row = Write-SheetTitle -Ws $wsRetire -Title 'Service Retirements' -BackLink `
     -Subtitle ('Model lifecycle (model catalog), Azure Advisor retirement recommendations, Azure Service Health retirement notices and classic AI services. Risk: RETIRED = past the retirement date, CRITICAL <= {0} days, WARNING <= {1} days, REVIEW = no retirement date published. {2}' -f $CriticalDays, $WarningDays, $generatedText) `
     -Note $(if ($retireGaps.Count) { "INCOMPLETE - $($retireGaps -join '; ') (see Data collection notes on the Summary sheet)." }) -NoteColor '#C00000'
 $row = Write-SectionTitle -Ws $wsRetire -Row $row -Text "Service retirements ($($RetirementRows.Count)) - $riskSummary$(if ($sourceSummary) { " | Sources - $sourceSummary" })"
-$retirementTable = Write-Table -Package $pkg -Sheet 'Service Retirements' -StartRow $row -Data $RetirementRows -TableName 'tblRetirements' `
+$null = Write-Table -Package $pkg -Sheet 'Service Retirements' -StartRow $row -Data $RetirementRows -TableName 'tblRetirements' `
     -EmptyText 'No retirements found for the AI resources in scope.'
 
 # --- Sheet 5: Service Health ---
@@ -2835,7 +4304,131 @@ $row = Write-SectionTitle -Ws $wsSec -Row $assessmentTable.NextRow -Text "Securi
 $null = Write-Table -Package $pkg -Sheet 'Security Best Practices' -StartRow $row -Data $AlertRows -TableName 'tblDefenderAlerts' `
     -EmptyText $(if ($AlertsOk) { "No Defender for Cloud security alerts for AI resources in the last $EventDays days." } else { 'Defender for Cloud security alerts could not be collected.' })
 
-# --- Sheets 7-29: one sheet per AI service ---
+# --- Sheet 7: Security Hygiene ---
+$hygGaps = @(
+    if ($hygieneErrors.ContainsKey('diag')) { 'diagnostic settings' }
+    if ($hygieneErrors.ContainsKey('locks')) { 'resource locks' }
+    if ($hygieneErrors.ContainsKey('activity')) { 'activity log' }
+)
+$noLockCount  = @($HygieneRows | Where-Object { $_.'Resource lock' -eq 'None' }).Count
+$openNetCount = @($HygieneRows | Where-Object { $_.'Network exposure' -eq 'All networks' }).Count
+$activityText = if ($DoActivityLog) { "Key retrievals (list keys) and regenerations: activity log, last $ActivityDays days (a hub includes its projects)." }
+                else { 'Key retrieval and rotation columns are blank: the activity log was skipped (-SkipActivityLog).' }
+$row = Write-SheetTitle -Ws $wsHyg -Title 'Security Hygiene' -BackLink `
+    -Subtitle ('Key-based (local) authentication, key usage and rotation, diagnostic logs, resource locks, network exposure, managed identity, encryption and Defender for AI services coverage of every AI resource. {0} {1}' -f $activityText, $generatedText) `
+    -Note $(if ($hygGaps.Count) { "INCOMPLETE - $($hygGaps -join ', ') could not be read for some items (see Data collection notes on the Summary sheet)." }) -NoteColor '#C00000'
+$row = Write-SectionTitle -Ws $wsHyg -Row $row -Text ('AI resources ({0}) - local auth enabled: {1} | key retrievals: {2} | without diagnostic logs: {3} | without resource lock: {4} | reachable from all networks: {5}' -f `
+        $HygieneRows.Count, $LocalAuthCount, $(if ($null -ne $KeyRetrievalSum) { $KeyRetrievalSum } else { 'n/a' }), $NoDiagLogsCount, $noLockCount, $openNetCount)
+$null = Write-Table -Package $pkg -Sheet 'Security Hygiene' -StartRow $row -Data $HygieneRows -TableName 'tblSecurityHygiene' -EmptyText 'No AI resources found in scope.'
+
+# --- Sheet 8: Content Filters ---
+$row = Write-SheetTitle -Ws $wsFilter -Title 'Content Filters' -BackLink `
+    -Subtitle ('Content filter (RAI) policies of the Foundry and Azure OpenAI resources compared with the Microsoft.DefaultV2 baseline: hate, sexual, violence and self-harm block Medium+ on prompts and completions, prompt shields (jailbreak) and protected material (text) block, protected material (code) annotates. Relaxed = weaker than the baseline in at least one setting; Not set = the deployment names no policy (the service default applies where the model supports content filtering). Filter request counts: Azure Monitor, last {0} days. {1}' -f $UsageDays, $generatedText)
+$row = Write-SectionTitle -Ws $wsFilter -Row $row -Text ('Content filter policies ({0}) - custom policies and the system policies in use | relaxed: {1}' -f $PolicyRows.Count, $RelaxedCount)
+$t = Write-Table -Package $pkg -Sheet 'Content Filters' -StartRow $row -Data $PolicyRows -TableName 'tblContentFilterPolicies' `
+    -EmptyText 'No content filter policies found (no Foundry or Azure OpenAI resources, or the policies could not be read).'
+$row = Write-SectionTitle -Ws $wsFilter -Row $t.NextRow -Text ('Model deployments by content filter ({0}) - not set: {1}' -f $FilterDeploymentRows.Count, $FilterNotSetCount)
+$filterTable = Write-Table -Package $pkg -Sheet 'Content Filters' -StartRow $row -Data $FilterDeploymentRows -TableName 'tblContentFilterDeployments' `
+    -EmptyText 'No Foundry or Azure OpenAI model deployments found.'
+
+# --- Sheet 9: Capacity and Quota ---
+$row = Write-SheetTitle -Ws $wsCap -Title 'Capacity and Quota' -BackLink `
+    -Subtitle ('Utilization of the Foundry and Azure OpenAI model deployments against their capacity - busiest-hour tokens per minute vs the rate limit, HTTP 429 throttling, PTU utilization, days without requests - and the model quota of each subscription and region (Cognitive Services usages API). Usage: last {0} days; idle detection: last {1} days. {2}' -f $UsageDays, $IdleLookbackDays, $generatedText) `
+    -Note $(if (-not $DoMetrics) { 'Right-sizing needs Azure Monitor metrics: not assessed (-SkipMetrics).' }) -NoteColor '#C00000'
+$row = Write-SectionTitle -Ws $wsCap -Row $row -Text ('Deployment right-sizing ({0} deployment(s), {1} candidate(s)) - Idle: no request for 30+ days | Throttled: 100+ or 1%+ HTTP 429 | PTU saturated: busiest hour 95%+ without spillover | PTU under-used: average below 30% | Over-allocated: busiest hour below 10% of the TPM limit' -f $RightSizingRows.Count, $RightSizingCandidates)
+$rightTable = Write-Table -Package $pkg -Sheet 'Capacity and Quota' -StartRow $row -Data $RightSizingRows -TableName 'tblRightSizing' -EmptyText 'No Foundry or Azure OpenAI model deployments found.'
+$row = Write-SectionTitle -Ws $wsCap -Row $rightTable.NextRow -Text ('Model quota in use ({0}) - {1} at 90% or more (Full: 100%+, High: 80%+)' -f $QuotaRows.Count, $QuotaHighCount)
+$null = Write-Table -Package $pkg -Sheet 'Capacity and Quota' -StartRow $row -Data $QuotaRows -TableName 'tblQuota' -EmptyText 'No model quota in use (or the quota could not be read).'
+
+# --- Sheet 10: AI Cost Reconciliation ---
+$shareText = { param($v) if ($null -ne $v) { '{0:P1}' -f $v } else { 'n/a' } }
+$reconNote = if (-not $DoCost) { 'Cost collection was skipped (-SkipCost).' }
+             elseif (-not $ReconAvailable) { 'The AI cost outside the AI resources could not be read (see Data collection notes on the Summary sheet).' }
+             elseif (-not ($SpendOk.Actual -and $SpendOk.Amortized)) {
+                 'INCOMPLETE - total AI spend ({0}) is not computed: part of that cost could not be read (see Data collection notes on the Summary sheet).' -f `
+                    ((@(if (-not $SpendOk.Actual) { 'actual' }) + @(if (-not $SpendOk.Amortized) { 'amortized' })) -join ' and ')
+             }
+             else { $null }
+$row = Write-SheetTitle -Ws $wsRecon -Title 'AI Cost Reconciliation' -BackLink `
+    -Subtitle ('Total AI spend, last {0} days: the AI resources on the service sheets plus the AI cost billed elsewhere - AI reservation purchases (e.g. PTU), unused AI reservations, Marketplace AI models, Copilot Studio and other AI meters - compared with all charges of the scanned subscriptions. Totals, non-AI spend and shares are Excel formulas. {1}' -f $UsageDays, $generatedText) `
+    -Note $reconNote -NoteColor '#C00000'
+$row = Write-SectionTitle -Ws $wsRecon -Row $row -Text ('AI spend by cost line - total AI spend: actual {0}, amortized {1} | AI share of subscription spend: actual {2}, amortized {3}' -f `
+        $AiSpendActualText, $AiSpendAmortizedText, (& $shareText $AiShareActual), (& $shareText $AiShareAmortized))
+$lineTable = Write-Table -Package $pkg -Sheet 'AI Cost Reconciliation' -StartRow $row -Data $ReconLineRows -TableName 'tblReconLines' `
+    -EmptyText $(if ($reconNote) { $reconNote } else { 'No cost data.' })
+if ($lineTable.Count) {
+    $h     = @($lineTable.Headers)
+    $block = $ReconLines.Count + 3   # cost lines + total AI spend + subscription total + non-AI spend
+    $measures = @(
+        @{ Col = 1 + $h.IndexOf('Actual cost'); Share = 1 + $h.IndexOf('Share of actual'); AiOk = $SpendOk.Actual; TotOk = [bool]$TotalsOk.Actual.Count },
+        @{ Col = 1 + $h.IndexOf('Amortized cost'); Share = 1 + $h.IndexOf('Share of amortized'); AiOk = $SpendOk.Amortized; TotOk = [bool]$TotalsOk.Amortized.Count }
+    )
+    for ($b = 0; $b -lt $ReconCurrencies.Count; $b++) {
+        $r0   = $lineTable.FirstRow + 1 + $b * $block
+        $rAi  = $r0 + $ReconLines.Count
+        $rSub = $rAi + 1
+        $rNon = $rAi + 2
+        foreach ($m in $measures) {
+            $subCell = $wsRecon.Cells[$rSub, $m.Col].Address
+            if ($m.AiOk) { $wsRecon.Cells[$rAi, $m.Col].Formula = 'SUM({0})' -f $wsRecon.Cells[$r0, $m.Col, ($rAi - 1), $m.Col].Address }
+            if ($m.AiOk -and $m.TotOk) { $wsRecon.Cells[$rNon, $m.Col].Formula = '{0}-{1}' -f $subCell, $wsRecon.Cells[$rAi, $m.Col].Address }
+            if (-not $m.TotOk) { continue }
+            for ($r = $r0; $r -le $rNon; $r++) {
+                $a = $wsRecon.Cells[$r, $m.Col].Address
+                $wsRecon.Cells[$r, $m.Share].Formula = 'IF(AND(ISNUMBER({0}),ISNUMBER({1}),{1}<>0),{0}/{1},"")' -f $a, $subCell
+            }
+        }
+        $wsRecon.Cells[$rAi, 1, $rNon, $lineTable.LastColumn].Style.Font.Bold = $true
+        $wsRecon.Cells[$rAi, 1, $rAi, $lineTable.LastColumn].Style.Border.Top.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Thin
+    }
+}
+$row = Write-SectionTitle -Ws $wsRecon -Row $lineTable.NextRow -Text ('AI spend per subscription ({0}) - AI resources = the AI resource lines, other AI = the other cost lines' -f $ReconSubRows.Count)
+$subTable = Write-Table -Package $pkg -Sheet 'AI Cost Reconciliation' -StartRow $row -Data $ReconSubRows -TableName 'tblReconSubscriptions' `
+    -EmptyText $(if ($reconNote) { $reconNote } else { 'No cost data.' })
+if ($subTable.Count) {
+    $h = @($subTable.Headers)
+    foreach ($m in 'actual', 'amortized') {
+        $cRes = 1 + $h.IndexOf("AI resources $m cost")
+        $cOth = 1 + $h.IndexOf("Other AI $m cost")
+        $cTot = 1 + $h.IndexOf("Total AI $m cost")
+        $cSub = 1 + $h.IndexOf("Subscription $m cost")
+        $cShr = 1 + $h.IndexOf("AI share ($m)")
+        for ($r = $subTable.FirstRow + 1; $r -le $subTable.LastRow; $r++) {
+            $tot = $wsRecon.Cells[$r, $cTot].Address
+            $sub = $wsRecon.Cells[$r, $cSub].Address
+            if ($null -ne $wsRecon.Cells[$r, $cRes].Value -and $null -ne $wsRecon.Cells[$r, $cOth].Value) {
+                $wsRecon.Cells[$r, $cTot].Formula = '{0}+{1}' -f $wsRecon.Cells[$r, $cRes].Address, $wsRecon.Cells[$r, $cOth].Address
+            }
+            $wsRecon.Cells[$r, $cShr].Formula = 'IF(AND(ISNUMBER({0}),ISNUMBER({1}),{1}<>0),{0}/{1},"")' -f $tot, $sub
+        }
+    }
+}
+$row = Write-SectionTitle -Ws $wsRecon -Row $subTable.NextRow -Text ('AI cost outside the service sheets - detail ({0})' -f $ReconDetailRows.Count)
+$null = Write-Table -Package $pkg -Sheet 'AI Cost Reconciliation' -StartRow $row -Data $ReconDetailRows -TableName 'tblReconDetail' `
+    -EmptyText $(if ($reconNote) { $reconNote } else { 'No AI cost outside the AI resources on the service sheets.' })
+# Cached values for the formulas (Excel recalculates them on open; other readers see the values).
+try { [OfficeOpenXml.CalculationExtension]::Calculate($wsRecon) } catch { Write-Verbose "Formula pre-calculation skipped: $($_.Exception.Message)" }
+
+# --- Sheet 11: ML Compute and Dependencies ---
+$depIssueCount = @($DependencyRows | Where-Object { $_.Issues -gt 0 }).Count
+$depMissing    = @($DependencyRows | Where-Object { $_.Found -eq 'Missing' }).Count
+$mlGaps = @(
+    if ($hygieneErrors.ContainsKey('computes')) { 'the computes of some workspaces' }
+    if ($depIds.Count -and -not (Test-ArgComplete 'ML workspace dependencies')) { 'the workspace dependencies (Resource Graph)' }
+)
+$row = Write-SheetTitle -Ws $wsMl -Title 'ML Compute and Dependencies' -BackLink `
+    -Subtitle ('Computes of the Azure Machine Learning workspaces and AI hubs (auto-shutdown, always-on nodes, public IP, SSH, local auth), the workspace dependencies (storage account, key vault, container registry, Application Insights) and the workspace cost by meter category (last {0} days). {1}' -f $UsageDays, $generatedText) `
+    -Note $(if ($mlGaps.Count) { "INCOMPLETE - $($mlGaps -join ' and ') could not be read (see Data collection notes on the Summary sheet)." }) -NoteColor '#C00000'
+$row = Write-SectionTitle -Ws $wsMl -Row $row -Text ('Computes ({0}) - {1} with findings' -f $ComputeRows.Count, $ComputeIssueCount)
+$t = Write-Table -Package $pkg -Sheet 'ML Compute and Dependencies' -StartRow $row -Data $ComputeRows -TableName 'tblMlComputes' `
+    -EmptyText $(if ($MlWorkspaces.Count) { 'No computes found in the workspaces.' } else { 'No Machine Learning workspaces or AI hubs found in scope.' })
+$row = Write-SectionTitle -Ws $wsMl -Row $t.NextRow -Text ('Workspace dependencies ({0}) - {1} with findings, {2} missing' -f $DependencyRows.Count, $depIssueCount, $depMissing)
+$t = Write-Table -Package $pkg -Sheet 'ML Compute and Dependencies' -StartRow $row -Data $DependencyRows -TableName 'tblMlDependencies' -EmptyText 'No workspace dependencies found.'
+$row = Write-SectionTitle -Ws $wsMl -Row $t.NextRow -Text ('Workspace cost by meter category ({0}) - compute, storage and other meters billed on the workspaces, AI hubs and hub projects' -f $MlCostRows.Count)
+$mlCostTable = Write-Table -Package $pkg -Sheet 'ML Compute and Dependencies' -StartRow $row -Data $MlCostRows -TableName 'tblMlCost' `
+    -EmptyText $(if (-not $DoCost) { 'Cost collection was skipped (-SkipCost).' } else { 'No cost billed on the workspaces in the window.' })
+
+# --- Sheets 12-34: one sheet per AI service ---
 foreach ($svc in $ServiceCatalog) {
     $ws    = $wb.Worksheets[$svc.Sheet]
     $items = @($Resources | Where-Object { $_.ServiceKey -eq $svc.Key })
@@ -2889,7 +4482,8 @@ foreach ($svc in $ServiceCatalog) {
 $resTable  = Write-Table -Package $pkg -Sheet 'Data_Resources' -StartRow 1 -Data $DataResources -TableName 'tblDataResources' -Style 'Light1' -NoAutoFit -EmptyText 'No data'
 $depTable  = Write-Table -Package $pkg -Sheet 'Data_Deployments' -StartRow 1 -Data $DataDeployments -TableName 'tblDataDeployments' -Style 'Light1' -NoAutoFit -EmptyText 'No data'
 $costTable = Write-Table -Package $pkg -Sheet 'Data_ModelCost' -StartRow 1 -Data (Select-Export -Rows $ModelCostRows) -TableName 'tblDataModelCost' -Style 'Light1' -NoAutoFit -EmptyText 'No data'
-foreach ($w in $wsDataRes, $wsDataDep, $wsDataCost) { for ($c = 1; $c -le 32; $c++) { $w.Column($c).Width = 20 } }
+$spendTable = Write-Table -Package $pkg -Sheet 'Data_AISpend' -StartRow 1 -Data (Select-Export -Rows $SpendRows) -TableName 'tblDataAISpend' -Style 'Light1' -NoAutoFit -EmptyText 'No data'
+foreach ($w in $wsDataRes, $wsDataDep, $wsDataCost, $wsDataSpend) { for ($c = 1; $c -le 32; $c++) { $w.Column($c).Width = 20 } }
 
 # --- Sheet 1: Summary ---
 $ws = $wsSummary
@@ -2909,7 +4503,7 @@ $ws.Cells['B2'].Style.Font.Color.SetColor((ConvertTo-Color '#595959'))
 $actualPartial    = $DoCost -and $ActualOkSubs.Count -gt 0 -and $ActualOkSubs.Count -lt $AiSubscriptions.Count
 $amortizedPartial = $DoCost -and $AmortizedOkSubs.Count -gt 0 -and $AmortizedOkSubs.Count -lt $AiSubscriptions.Count
 $costGap          = $DoCost -and $AiSubscriptions.Count -gt 0 -and ($ActualOkSubs.Count -lt $AiSubscriptions.Count -or $AmortizedOkSubs.Count -lt $AiSubscriptions.Count)
-$ws.Cells['B3'].Value = 'Cost and token usage: last {0} days (actual and amortized cost{1}{2}). Service Health and security alerts: active + last {3} days. Retirement flags: CRITICAL <= {4} days, WARNING <= {5} days.' -f `
+$ws.Cells['B3'].Value = 'Cost and token usage: last {0} days (actual and amortized cost{1}{2}). Service Health: active + last {3} days; security alerts: last {3} days. Retirement flags: CRITICAL <= {4} days, WARNING <= {5} days.' -f `
     $UsageDays, $(if ($CurrencyLabel) { ", $CurrencyLabel" } else { '' }), $(if ($costGap) { '; incomplete - see Data collection notes' } else { '' }), $EventDays, $CriticalDays, $WarningDays
 $ws.Cells['B3'].Style.Font.Italic = $true
 $ws.Cells['B3'].Style.Font.Size = 9
@@ -2923,6 +4517,11 @@ $tokenTotal     = [double](($ModelHostDeployments | ForEach-Object { [double]$_.
 $costSuffix     = if ($CurrencyLabel -and -not $MultiCurrency) { " ($CurrencyLabel)" } else { '' }
 $actualKpi      = if (-not $ActualOkSubs.Count) { 'n/a' } elseif ($MultiCurrency) { $ActualTotalText } else { $TotalActual }
 $amortizedKpi   = if (-not $AmortizedOkSubs.Count) { 'n/a' } elseif ($MultiCurrency) { $AmortizedTotalText } else { $TotalAmortized }
+$spendCurrency  = @(@($AiSpendAmortized.Keys) + @($AiSpendActual.Keys) | Where-Object { $_ } | Sort-Object -Unique)
+$spendSingle    = $ReconAvailable -and $spendCurrency.Count -le 1
+$spendSuffix    = if ($spendSingle -and $spendCurrency.Count) { " ($($spendCurrency[0]))" } else { '' }
+$aiSpendActualKpi    = if (-not $SpendOk.Actual) { 'n/a' } elseif ($spendSingle) { [double](@($AiSpendActual.Values) + 0 | Measure-Object -Sum).Sum } else { $AiSpendActualText }
+$aiSpendAmortizedKpi = if (-not $SpendOk.Amortized) { 'n/a' } elseif ($spendSingle) { [double](@($AiSpendAmortized.Values) + 0 | Measure-Object -Sum).Sum } else { $AiSpendAmortizedText }
 # Label, value, number format, sheet the label links to.
 $kpis = @(
     @('AI resources', $Resources.Count, '#,##0', $null),
@@ -2934,25 +4533,36 @@ $kpis = @(
     @("Tokens - last $UsageDays days", $(if ($DoMetrics) { $tokenTotal } else { 'n/a' }), '#,##0', 'Visuals'),
     @("Actual cost - last $UsageDays days$costSuffix$(if ($actualPartial) { ' (partial)' })", $actualKpi, '#,##0.00', 'Visuals'),
     @("Amortized cost - last $UsageDays days$costSuffix$(if ($amortizedPartial) { ' (partial)' })", $amortizedKpi, '#,##0.00', 'Visuals'),
+    @("Total AI spend - actual$spendSuffix", $aiSpendActualKpi, '#,##0.00', 'AI Cost Reconciliation'),
+    @("Total AI spend - amortized$spendSuffix", $aiSpendAmortizedKpi, '#,##0.00', 'AI Cost Reconciliation'),
+    @('AI share of subscription spend (amortized)', $(if ($null -ne $AiShareAmortized) { $AiShareAmortized } else { 'n/a' }), '0.0%', 'AI Cost Reconciliation'),
     @('Advisor recommendations', $(if ($AdvisorOk) { $AdvisorRows.Count } else { 'n/a' }), '#,##0', 'Recommendations'),
     @("Retired or retiring within $WarningDays days", $retireSoon, '#,##0', 'Service Retirements'),
+    @('Active Service Health events', $(if ($HealthOk) { $activeHealth } else { 'n/a' }), '#,##0', 'Service Health'),
     @('Defender unhealthy findings', $(if ($AssessmentsOk) { $UnhealthyCount } else { 'n/a' }), '#,##0', 'Security Best Practices'),
     @("Security alerts - last $EventDays days", $(if ($AlertsOk) { $AlertRows.Count } else { 'n/a' }), '#,##0', 'Security Best Practices'),
-    @('Active Service Health events', $(if ($HealthOk) { $activeHealth } else { 'n/a' }), '#,##0', 'Service Health')
+    @('Resources with local auth (keys) enabled', $LocalAuthCount, '#,##0', 'Security Hygiene'),
+    @('Resources without diagnostic logs', $(if ($DiagByRes.Count) { $NoDiagLogsCount } else { 'n/a' }), '#,##0', 'Security Hygiene'),
+    @('Relaxed content filter policies', $RelaxedCount, '#,##0', 'Content Filters'),
+    @('Deployments without content filter', $FilterNotSetCount, '#,##0', 'Content Filters'),
+    @('Right-sizing candidates', $(if ($DoMetrics) { $RightSizingCandidates } else { 'n/a' }), '#,##0', 'Capacity and Quota'),
+    @('Model quotas 90%+ used', $(if ($QuotaByPair.Count) { $QuotaHighCount } else { 'n/a' }), '#,##0', 'Capacity and Quota'),
+    @('ML computes with findings', $ComputeIssueCount, '#,##0', 'ML Compute and Dependencies')
 )
-$kpisPerRow = 7
+$kpisPerRow = 8
 for ($i = 0; $i -lt $kpis.Count; $i++) {
     Write-Kpi -Ws $ws -Row ([int](5 + [Math]::Floor($i / $kpisPerRow) * 3)) -Column (2 + ($i % $kpisPerRow)) `
         -Label $kpis[$i][0] -Value $kpis[$i][1] -Format $kpis[$i][2] -LinkSheet $kpis[$i][3]
 }
-for ($r = 0; $r -lt [Math]::Ceiling($kpis.Count / $kpisPerRow); $r++) {
+$kpiRows = [int][Math]::Ceiling($kpis.Count / $kpisPerRow)
+for ($r = 0; $r -lt $kpiRows; $r++) {
     $labelRow = 5 + $r * 3
     $ws.Row($labelRow).Height = 26   # two lines of 9pt label text
     $tileValues = @($kpis | Select-Object -Skip ($r * $kpisPerRow) -First $kpisPerRow | ForEach-Object { $_[1] })
     if (@($tileValues | Where-Object { $_ -is [string] -and $_.Length -gt 12 }).Count) { $ws.Row($labelRow + 1).Height = 40 }
 }
 
-$row = Write-SectionTitle -Ws $ws -Row 12 -Column 2 -Text 'AI services summary (select a sheet name to open it)'
+$row = Write-SectionTitle -Ws $ws -Row (5 + $kpiRows * 3 + 1) -Column 2 -Text 'AI services summary (select a sheet name to open it)'
 $summaryTable = Write-Table -Package $pkg -Sheet 'Summary' -StartRow $row -StartColumn 2 -Data $SummaryRows -TableName 'tblSummary' -NoAutoFit
 $hdr = @($summaryTable.Headers)
 for ($i = 1; $i -lt $hdr.Count; $i++) { $ws.Column(2 + $i).Width = [Math]::Max(18, $hdr[$i].Length + 5) }
@@ -2969,6 +4579,33 @@ for ($r = $summaryTable.FirstRow + 1; $r -le $summaryTable.LastRow; $r++) {
     $cell.Style.Font.Color.SetColor((ConvertTo-Color '#0563C1'))
 }
 $totalRow = $summaryTable.LastRow + 1
+# What the KPI tiles count but no service row holds, on its own line so that the total matches the tiles.
+$otherValues = [ordered]@{}
+$otherParts  = [System.Collections.Generic.List[string]]::new()
+if ($OutsideCount) {
+    if ($ActualOkSubs.Count) { $otherValues['Actual cost'] = $(if ($MultiCurrency) { Format-CurrencyTotal -Map $OutsideActualByCurrency -Available $true } else { [double](@($OutsideActualByCurrency.Values) + 0 | Measure-Object -Sum).Sum }) }
+    if ($AmortizedOkSubs.Count) { $otherValues['Amortized cost'] = $(if ($MultiCurrency) { Format-CurrencyTotal -Map $OutsideAmortizedByCurrency -Available $true } else { [double](@($OutsideAmortizedByCurrency.Values) + 0 | Measure-Object -Sum).Sum }) }
+    $otherParts.Add("cost of $OutsideCount resource(s) no longer in scope or of other kinds")
+}
+if ($AdvisorOk -and $UnattributedAdvisor) { $otherValues['Advisor recommendations'] = $UnattributedAdvisor; $otherParts.Add("$UnattributedAdvisor subscription-level recommendation(s)") }
+if ($UnattributedRetirements) { $otherValues['Retirement items'] = $UnattributedRetirements; $otherParts.Add("$UnattributedRetirements retirement item(s) of other services") }
+if ($otherValues.Count) {
+    $ws.Cells[$totalRow, 2].Value = 'Not on a service sheet'
+    $desc = $ws.Cells[$totalRow, 3, $totalRow, (2 + $hdr.IndexOf('Model deployments'))]
+    $desc.Merge = $true
+    $ws.Cells[$totalRow, 3].Value = ($otherParts -join '; ')
+    foreach ($k in $otherValues.Keys) {
+        $cell = $ws.Cells[$totalRow, (2 + $hdr.IndexOf($k))]
+        $cell.Value = $otherValues[$k]
+        $fmt = Get-ColumnFormat $k
+        $cell.Style.Numberformat.Format = $(if ($fmt) { $fmt } else { '#,##0' })
+    }
+    if ($OutsideCount -and -not $MultiCurrency -and $CurrencyLabel) { $ws.Cells[$totalRow, (2 + $hdr.IndexOf('Currency'))].Value = $CurrencyLabel }
+    $otherRange = $ws.Cells[$totalRow, 2, $totalRow, $summaryTable.LastColumn]
+    $otherRange.Style.Font.Italic = $true
+    $otherRange.Style.Font.Color.SetColor((ConvertTo-Color '#595959'))
+    $totalRow++
+}
 $ws.Cells[$totalRow, 2].Value = 'Total'
 foreach ($colName in 'Resources', 'Model deployments', 'Actual cost', 'Amortized cost', 'Advisor recommendations', 'Defender unhealthy', 'Retirement items') {
     $ci   = 2 + $hdr.IndexOf($colName)
@@ -2976,7 +4613,7 @@ foreach ($colName in 'Resources', 'Model deployments', 'Actual cost', 'Amortized
     if (($colName -in 'Actual cost', 'Amortized cost') -and $MultiCurrency) { $cell.Value = 'per currency: see KPI'; continue }
     if (($colName -eq 'Actual cost' -and -not $ActualOkSubs.Count) -or ($colName -eq 'Amortized cost' -and -not $AmortizedOkSubs.Count) -or
         ($colName -eq 'Advisor recommendations' -and -not $AdvisorOk) -or ($colName -eq 'Defender unhealthy' -and -not $AssessmentsOk)) { continue }
-    $cell.Value = [double](($SummaryRows | ForEach-Object { [double]$_.$colName } | Measure-Object -Sum).Sum)
+    $cell.Value = [double](($SummaryRows | ForEach-Object { [double]$_.$colName } | Measure-Object -Sum).Sum) + [double]$otherValues[$colName]
     $fmt = Get-ColumnFormat $colName
     $cell.Style.Numberformat.Format = $(if ($fmt) { $fmt } else { '#,##0' })
 }
@@ -2988,15 +4625,24 @@ $ws.Cells[$totalRow, (2 + $hdr.IndexOf('Subscriptions'))].Value = $AiSubscriptio
 $totalRange = $ws.Cells[$totalRow, 2, $totalRow, $summaryTable.LastColumn]
 $totalRange.Style.Font.Bold = $true
 $totalRange.Style.Border.Top.Style = [OfficeOpenXml.Style.ExcelBorderStyle]::Double
+# Autosize to the largest KPI tile value (16pt) and table value, so large numbers never show as "#####".
+Resize-ColumnToFit -Ws $ws -Address @(
+    $ws.Cells[5, 2, (3 + $kpiRows * 3), (1 + $kpisPerRow)].Address,
+    $ws.Cells[$summaryTable.FirstRow, 2, $totalRow, $summaryTable.LastColumn].Address)
 
 # Workbook guide: label, target sheet, description.
 $row = Write-SectionTitle -Ws $ws -Row ($totalRow + 3) -Column 2 -Text 'Report sheets'
 $sheetGuide = @(
-    @('Visuals', 'Visuals', 'Pivot tables and charts: most common models, AI resources per service and region, token cost per deployed model, tokens per model, cost per service, retirement outlook, Defender and Advisor findings.'),
+    @('Visuals', 'Visuals', 'Pivot tables and charts: most common models, AI resources per service and region, token cost per deployed model, tokens per model, cost per service, total AI spend by cost line, ML workspace cost, retirement outlook, right-sizing, content filters, Defender and Advisor findings.'),
     @('Recommendations', 'Recommendations', "Azure Advisor recommendations for the AI resources ($(if ($AdvisorOk) { $AdvisorRows.Count } else { 'incomplete' }))."),
     @('Service Retirements', 'Service Retirements', "Model and service retirements with risk, impact and recommended action ($($RetirementRows.Count), $retireSoon retired or due within $WarningDays days)."),
     @('Service Health', 'Service Health', "Azure Service Health events - service issues, planned maintenance, health and security advisories, billing updates ($($HealthRows.Count), $(if ($HealthOk) { "$activeHealth active" } else { 'incomplete' }))."),
     @('Security Best Practices', 'Security Best Practices', "Microsoft Defender for Cloud plan coverage, recommendations and security alerts for the AI resources ($(if ($AssessmentsOk) { "$UnhealthyCount unhealthy findings" } else { 'incomplete' }))."),
+    @('Security Hygiene', 'Security Hygiene', "Per-resource hygiene: local auth (keys), key retrievals and rotation from the Activity Log, diagnostic logs, resource locks, network exposure, managed identity and encryption ($LocalAuthCount with keys enabled, $(if ($DiagByRes.Count) { "$NoDiagLogsCount without diagnostic logs" } else { 'diagnostic settings not read' }))."),
+    @('Content Filters', 'Content Filters', "Content filter (RAI) policies against the Microsoft default baseline, and the policy and screening results of every deployment ($RelaxedCount relaxed policies, $FilterNotSetCount deployments without a filter)."),
+    @('Capacity and Quota', 'Capacity and Quota', "Right-sizing of every model deployment (idle, throttled, PTU utilization, over-allocated) and model quota usage per subscription and region ($(if ($DoMetrics) { "$RightSizingCandidates candidates" } else { 'metrics skipped' }), $QuotaHighCount quotas 90%+ used)."),
+    @('AI Cost Reconciliation', 'AI Cost Reconciliation', "Total AI spend - AI resources, PTU reservations, Marketplace models, Copilot Studio and other AI meters - against the subscription total, per subscription and per charge$(if ($null -ne $AiShareAmortized) { " (AI share $('{0:P1}' -f $AiShareAmortized) amortized)" })."),
+    @('ML Compute and Dependencies', 'ML Compute and Dependencies', "Azure Machine Learning and Foundry hub compute (idle shutdown, public IP, SSH, min nodes), workspace dependencies (storage, key vault, registry, Application Insights) and cost per workspace ($ComputeIssueCount computes with findings)."),
     @("AI service sheets ($($ServiceCatalog.Count))", $ServiceCatalog[0].Sheet, 'One sheet per AI service with resource inventory details (see the AI services summary above); every sheet links back to this Summary.')
 )
 foreach ($entry in $sheetGuide) {
@@ -3018,7 +4664,8 @@ $ws = $wsVisuals
 $ws.View.ShowGridLines = $false
 $ws.Column(1).Width = 2
 $ws.Column(2).Width = 46
-for ($c = 3; $c -le 64; $c++) { $ws.Column($c).Width = 18 }
+# Fixed widths (pivot autofit is off): wide enough for the longest captions and column items, e.g. "Amortized cost (sum)".
+for ($c = 3; $c -le 64; $c++) { $ws.Column($c).Width = 22 }
 
 $usageLabel = "last $UsageDays days"
 # Measure of the token cost chart (-CostType); falls back to the other measure when that dataset could not be read.
@@ -3101,10 +4748,43 @@ if ($DataResources.Count -and $resourceCostTotal -gt 0) {
         -ChartType 'ColumnClustered' -RowItems $svcRowItems -SortByValue -SortDataField $(if ($chartMeasure -eq 'Actual cost') { 0 } else { 1 }) -NoGrandTotalRow:$MultiCurrency
 }
 
+$spendExport = @(Select-Export -Rows $SpendRows)
+if ($ReconAvailable -and $spendExport.Count -and $spendTable.Count) {
+    $spendMulti     = (Get-DistinctCount $spendExport 'Currency') -gt 1
+    $spendRowFields = if ($spendMulti) { @('Currency', 'Cost line') } else { @('Cost line') }
+    $spendRowItems  = if ($spendMulti) { (Get-DistinctCount $spendExport 'Currency') + @($spendExport | ForEach-Object { "$($_.Currency)|$($_.'Cost line')" } | Sort-Object -Unique).Count } else { Get-DistinctCount $spendExport 'Cost line' }
+    $row += Add-PivotBlock -Ws $ws -Row $row -Name 'ptAISpend' -Title "Total AI spend by cost line ($usageLabel)" `
+        -Subtitle 'AI resources, AI meters billed outside them, PTU reservation purchases, Marketplace models, Copilot Studio / Power Platform and other AI meters - reconciled against the subscription total on the AI Cost Reconciliation sheet.' `
+        -Source $spendTable.Range -RowFields $spendRowFields -DataFields @(
+            @{ Field = 'Actual cost'; Function = 'Sum'; Caption = 'Actual cost (sum)'; Format = '#,##0.00##' },
+            @{ Field = 'Amortized cost'; Function = 'Sum'; Caption = 'Amortized cost (sum)'; Format = '#,##0.00##' }) `
+        -ChartType 'BarClustered' -RowItems $spendRowItems -SortByValue -SortDataField $(if ($chartMeasure -eq 'Actual cost') { 0 } else { 1 }) -NoGrandTotalRow:$spendMulti
+}
+
+$mlCostExport = @(Select-Export -Rows $MlCostRows)
+if ($mlCostExport.Count -and $mlCostTable.Count) {
+    $row += Add-PivotBlock -Ws $ws -Row $row -Name 'ptMlCost' -Title "Machine Learning and Foundry hub cost per workspace ($($chartMeasure.ToLowerInvariant()), $usageLabel$(if ($CurrencyLabel) { ", $CurrencyLabel" }))" `
+        -Subtitle 'Workspace cost split by meter category (compute, storage, Foundry models ...) - details on the ML Compute and Dependencies sheet.' `
+        -Source $mlCostTable.Range -RowFields 'Workspace' -ColumnFields 'Meter category' -DataFields @(@{ Field = $chartMeasure; Function = 'Sum'; Caption = 'Workspace cost'; Format = '#,##0.00##' }) `
+        -ChartType 'ColumnStacked' -RowItems (Get-DistinctCount $mlCostExport 'Workspace') -ColumnItems (Get-DistinctCount $mlCostExport 'Meter category') -SortByValue
+}
+
 if ($depRows.Count -and $DoLifecycle) {
     $row += Add-PivotBlock -Ws $ws -Row $row -Name 'ptRetirement' -Title 'Model retirement outlook' -Subtitle "Deployments by retirement risk (CRITICAL <= $CriticalDays days, WARNING <= $WarningDays days) - details on the Service Retirements sheet." `
         -Source $depTable.Range -RowFields 'Retirement risk' -DataFields @(@{ Field = 'Deployment'; Function = 'Count'; Caption = 'Deployments'; Format = '#,##0' }) `
         -ChartType 'Pie' -RowItems (Get-DistinctCount $depRows 'Retirement risk') -SortByValue
+}
+
+if ($DoMetrics -and $rightTable.Count) {
+    $row += Add-PivotBlock -Ws $ws -Row $row -Name 'ptRightSizing' -Title "Model deployment right-sizing ($usageLabel)" -Subtitle 'Idle, throttled (429), PTU saturated or under-used and over-allocated deployments - details on the Capacity and Quota sheet.' `
+        -Source $rightTable.Range -RowFields 'Right-sizing' -DataFields @(@{ Field = 'Deployment'; Function = 'Count'; Caption = 'Deployments'; Format = '#,##0' }) `
+        -ChartType 'Pie' -RowItems (Get-DistinctCount $RightSizingRows 'Right-sizing') -SortByValue
+}
+
+if ($filterTable.Count) {
+    $row += Add-PivotBlock -Ws $ws -Row $row -Name 'ptContentFilter' -Title 'Content filter posture of model deployments' -Subtitle 'Deployments by content filter (RAI policy) assessment against the Microsoft default baseline - details on the Content Filters sheet.' `
+        -Source $filterTable.Range -RowFields 'Content filter assessment' -DataFields @(@{ Field = 'Deployment'; Function = 'Count'; Caption = 'Deployments'; Format = '#,##0' }) `
+        -ChartType 'Pie' -RowItems (Get-DistinctCount $FilterDeploymentRows 'Content filter assessment') -SortByValue
 }
 
 if ($assessmentTable.Count) {
@@ -3133,7 +4813,7 @@ $nsSheet.AddNamespace('d', 'http://schemas.openxmlformats.org/spreadsheetml/2006
 $summaryView = $wsSummary.WorksheetXml.SelectSingleNode('/d:worksheet/d:sheetViews/d:sheetView', $nsSheet)
 if ($summaryView) { $summaryView.SetAttribute('tabSelected', '1') }
 $wb.View.ActiveTab = 0
-if (-not $ShowDataSheets) { foreach ($w in $wsDataRes, $wsDataDep, $wsDataCost) { $w.Hidden = [OfficeOpenXml.eWorkSheetHidden]::Hidden } }
+if (-not $ShowDataSheets) { foreach ($w in $wsDataRes, $wsDataDep, $wsDataCost, $wsDataSpend) { $w.Hidden = [OfficeOpenXml.eWorkSheetHidden]::Hidden } }
 $wb.Properties.Title   = 'Azure AI Inventory'
 $wb.Properties.Subject = "Tenant $TenantId"
 $wb.Properties.Author  = [string]$AzContext.Account.Id
@@ -3152,11 +4832,25 @@ if ($DoCost) {
     $coverage = { param($Ok) if ($Ok.Count -lt $AiSubscriptions.Count) { " (covers $($Ok.Count) of $($AiSubscriptions.Count) subscription(s))" } else { '' } }
     Write-Host ('  {0,-24}: {1}{2}' -f "Actual cost ($UsageDays days)", $ActualTotalText, (& $coverage $ActualOkSubs))
     Write-Host ('  {0,-24}: {1}{2}' -f "Amortized cost ($UsageDays days)", $AmortizedTotalText, (& $coverage $AmortizedOkSubs))
+    if ($ReconAvailable) {
+        Write-Host ('  Total AI spend          : actual {0}, amortized {1}{2}' -f $AiSpendActualText, $AiSpendAmortizedText, $(if ($null -ne $AiShareAmortized) { " ({0:P1} of the subscription spend, amortized)" -f $AiShareAmortized }))
+    }
 }
 Write-Host ('  Advisor recommendations : {0}' -f $(if ($AdvisorOk) { $AdvisorRows.Count } else { "$($AdvisorRows.Count) (incomplete)" }))
-Write-Host ('  Retirement items        : {0} ({1} retired or due within {2} days)' -f $RetirementRows.Count, $retireSoon, $WarningDays)
-Write-Host ('  Service Health events   : {0} ({1} active)' -f $HealthRows.Count, $activeHealth)
-Write-Host ('  Defender findings       : {0} unhealthy of {1} assessments, {2} alert(s)' -f $UnhealthyCount, $AssessmentRows.Count, $AlertRows.Count)
+# Mirror the INCOMPLETE flags of the workbook: a count read from a failed source is not a fact.
+$incomplete = { param([bool]$Ok) if ($Ok) { '' } else { ' (incomplete)' } }
+$raiFailed    = @($AcctResults.Values | Where-Object { $_.RaiError }).Count
+$metricFailed = @($AcctResults.Values | Where-Object { $_.PeakError -or $_.DailyError -or $_.PtuError }).Count
+Write-Host ('  Retirement items        : {0} ({1} retired or due within {2} days){3}' -f $RetirementRows.Count, $retireSoon, $WarningDays, (& $incomplete (-not $retireGaps.Count)))
+Write-Host ('  Service Health events   : {0} ({1} active){2}' -f $HealthRows.Count, $activeHealth, (& $incomplete $HealthOk))
+Write-Host ('  Defender findings       : {0} unhealthy of {1} assessments{2}, {3} alert(s){4}' -f $UnhealthyCount, $AssessmentRows.Count, (& $incomplete $AssessmentsOk), $AlertRows.Count, (& $incomplete $AlertsOk))
+Write-Host ('  Security hygiene        : {0} with local auth (keys) enabled, {1} without diagnostic logs{2}{3}' -f $LocalAuthCount, $(if ($DiagByRes.Count) { $NoDiagLogsCount } else { 'n/a' }),
+    $(if ($null -ne $KeyRetrievalSum) { ", $KeyRetrievalSum key retrieval(s) in $ActivityDays days" }), $(if ($hygGaps.Count) { " (incomplete: $($hygGaps -join ', '))" }))
+Write-Host ('  Content filters         : {0} relaxed polic(ies), {1} deployment(s) without a filter{2}' -f $RelaxedCount, $FilterNotSetCount, (& $incomplete (-not $raiFailed)))
+Write-Host ('  Capacity and quota      : {0} right-sizing candidate(s), {1} model quota(s) 90%+ used{2}' -f $(if ($DoMetrics) { $RightSizingCandidates } else { 'n/a' }),
+    $(if ($QuotaByPair.Count) { $QuotaHighCount } else { 'n/a' }), (& $incomplete (-not ($QuotaFailures -or ($DoMetrics -and $metricFailed)))))
+Write-Host ('  ML compute and deps     : {0} compute(s) ({1} with findings), {2} dependenc(ies) ({3} with findings){4}' -f $ComputeRows.Count, $ComputeIssueCount, $DependencyRows.Count,
+    @($DependencyRows | Where-Object { $_.Issues -gt 0 }).Count, (& $incomplete (-not $mlGaps.Count)))
 if ($Notes.Count) { Write-Host ('  Collection notes        : {0} (listed at the bottom of the Summary sheet)' -f $Notes.Count) -ForegroundColor Yellow }
 Write-Host ('  Duration                : {0:mm\:ss}' -f $elapsed)
 
