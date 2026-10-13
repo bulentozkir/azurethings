@@ -9,6 +9,7 @@
         "AzureChinaCloud",
         "AzureUSGovernment"
       ],
+      "alzUpstreamEffect": "Audit",
       "category": "Tags",
       "source": "https://github.com/Azure/Enterprise-Scale/",
       "version": "1.0.1"

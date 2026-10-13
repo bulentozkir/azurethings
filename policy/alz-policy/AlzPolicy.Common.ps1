@@ -1,13 +1,20 @@
 # Shared logic for Import-AlzPolicy.ps1, Deploy-AlzPolicy.ps1 and Test-AlzPolicy.ps1. Dot-source this file.
 #
-# The JSON files under ./definitions are untouched copies of the Azure Landing Zones (ALZ) custom policy definitions.
-# The initiative is generated from them in memory with one systematic change per definition: an audit-mode effect is
-# added to the allowed values of the definition's effect parameter (a hard-coded effect becomes a parameter whose
-# default stays the upstream effect). The initiative then exposes one effect parameter per policy whose default is that
-# audit-mode effect, so assigning it audits everything until an effect is switched at assignment time.
+# The JSON files under ./definitions are the Azure Landing Zones (ALZ) custom policy definitions converted to audit by
+# default. The conversion (ConvertTo-AlzAuditFirstDefinition, applied by Import-AlzPolicy.ps1) changes only the effect
+# handling of each definition: its effect parameter defaults to an audit-mode effect, the upstream effect stays
+# selectable and is recorded in metadata.alzUpstreamEffect, and a hard-coded effect becomes a parameter. Everything else
+# is upstream's, which the fingerprints in alz-library-source.json prove, except for the few documented policy rule
+# adjustments in $script:AlzPolicyRuleAdjustments. Policies that are authored in this repository live in
+# ./local-definitions: the import never touches them and they have to audit by default already. The initiative is
+# generated from both and exposes one effect parameter per policy that defaults to the same audit-mode effect, so
+# assigning the initiative audits everything until an effect is switched at assignment time.
 
 $script:AlzManagedBy = 'azurethings-alz-policy'
 $script:AlzPolicyApiVersion = '2023-04-01'
+
+# Metadata that the conversion, the adjustments and publishing add; everything else in a definition must equal upstream.
+$script:AlzAddedMetadata = @('alzUpstreamEffect', 'alzAdjustment', 'managedBy', 'alzName', 'alzLibraryVersion')
 
 # Parameters that are deliberately shared by several policies. Every other parameter is namespaced per policy so that
 # unrelated inputs that merely share a name (two different rgName inputs, for example) can never collide.
@@ -16,18 +23,34 @@ $script:AlzSharedParameters = @(
     'mandatoryTags', 'allowedVnets', 'vulnerabilityAssessmentsStorageID'
 )
 
-$script:AlzAuditEffects = @('Audit', 'AuditIfNotExists', 'AuditAction')
+# The only effects that a definition or the initiative may default to.
+$script:AlzAuditEffects = @('Audit', 'AuditIfNotExists')
 
-# Audit-mode counterpart of every enforcing effect that ALZ definitions use.
+# Audit-mode counterpart of every enforcing effect that ALZ definitions use. AuditIfNotExists is for the effect that
+# deploys something (DeployIfNotExists). Everything else, DenyAction included, audits with plain Audit: AuditIfNotExists
+# needs a related resource type (details.type), which those definitions do not have.
 $script:AlzAuditEffectFor = @{
     Deny              = 'Audit'
     Modify            = 'Audit'
     Append            = 'Audit'
     DeployIfNotExists = 'AuditIfNotExists'
-    DenyAction        = 'AuditAction'
+    DenyAction        = 'Audit'
 }
 
-$script:AlzEffectNames = @('Audit', 'AuditIfNotExists', 'AuditAction', 'Deny', 'DenyAction', 'DeployIfNotExists', 'Modify', 'Append', 'Disabled')
+$script:AlzEffectNames = @('Audit', 'AuditIfNotExists', 'Deny', 'DenyAction', 'DeployIfNotExists', 'Modify', 'Append', 'Disabled')
+
+# Deliberate changes to the policy rule of single imported definitions. The import applies them after the audit
+# conversion and records each one in metadata.alzAdjustment of the definition, in alz-library-source.json (with the
+# fingerprint of the result) and in policy-catalog.md. Keep the table short: every entry deviates from upstream and has
+# to be reviewed against each new upstream release (the import fails when an adjustment finds nothing left to change).
+# Apply names a function that edits the definition properties in place and returns $true when it changed the rule.
+$script:AlzPolicyRuleAdjustments = @{
+    'Audit-AzureHybridBenefit' = @{
+        Id          = 'no-windows-server-version-list'
+        Apply       = 'Remove-AlzImageSkuCondition'
+        Description = 'Removed the Windows Server version conditions (Microsoft.Compute/imageSKU: 2008-R2-SP1, 2012, 2016, 2019 and 2022 upstream) from the policy rule. Every Windows Server marketplace image without Azure Hybrid Benefit is reported, whatever its version.'
+    }
+}
 
 # Informational only (used by the catalog); unknown role IDs are shown as the GUID.
 $script:AlzRoleNames = @{
@@ -63,21 +86,131 @@ function Copy-AlzObject {
     ConvertTo-Json -InputObject $InputObject -Depth 100 -Compress | ConvertFrom-Json -AsHashtable -Depth 100
 }
 
+$script:AlzControlCharacters = [regex]::new('[\x00-\x1f]')
+
+function ConvertTo-AlzJsonString {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+    $escaped = $Text.Replace('\', '\\').Replace('"', '\"')
+    if ($script:AlzControlCharacters.IsMatch($escaped)) {
+        $escaped = $script:AlzControlCharacters.Replace($escaped, [System.Text.RegularExpressions.MatchEvaluator] { param($match) ('\u{0:x4}' -f [int][char]$match.Value) })
+    }
+    '"' + $escaped + '"'
+}
+
 function Get-AlzCanonicalJson {
-    # Key-order independent JSON, used to compare schemas and prove that definitions were not changed unintentionally.
+    # Key-order independent JSON for comparing schemas and fingerprinting definitions. It does not use the PowerShell
+    # serializer (ordinal key order, invariant number format, own string escaping), so a fingerprint taken on one
+    # machine is valid on every machine and PowerShell version.
     param($Value)
+
     if ($null -eq $Value) { return 'null' }
+    if ($Value -is [string]) { return ConvertTo-AlzJsonString $Value }
+    if ($Value -is [bool]) { return $(if ($Value) { 'true' } else { 'false' }) }
     if ($Value -is [System.Collections.IDictionary]) {
-        $parts = foreach ($key in ($Value.Keys | Sort-Object -CaseSensitive)) {
-            '{0}:{1}' -f (ConvertTo-Json -InputObject ([string]$key) -Compress), (Get-AlzCanonicalJson $Value[$key])
-        }
+        $parts = foreach ($key in (Get-AlzSortedKey $Value)) { '{0}:{1}' -f (ConvertTo-AlzJsonString $key), (Get-AlzCanonicalJson $Value[$key]) }
         return '{' + ($parts -join ',') + '}'
     }
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+    if ($Value -is [System.Collections.IEnumerable]) {
         $items = foreach ($item in $Value) { Get-AlzCanonicalJson $item }
         return '[' + ($items -join ',') + ']'
     }
-    ConvertTo-Json -InputObject $Value -Compress
+    if ($Value -is [System.IFormattable]) { return $Value.ToString($null, [System.Globalization.CultureInfo]::InvariantCulture) }
+    ConvertTo-AlzJsonString ([string]$Value)
+}
+
+function Get-AlzSortedObject {
+    # Copy of a parsed JSON value with the keys of every object in ordinal order, which is the layout of the upstream files.
+    param($Value)
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in (Get-AlzSortedKey $Value)) { $result[$key] = Get-AlzSortedObject $Value[$key] }
+        return $result
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return , @($Value | ForEach-Object { Get-AlzSortedObject $_ })
+    }
+    $Value
+}
+
+function ConvertTo-AlzDefinitionJson {
+    # Text of a definition file in the layout of the upstream files (ordinal key order, two-space indent, LF, no final
+    # newline), so that a diff against upstream shows only the real changes.
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Definition)
+    $json = ConvertTo-Json -InputObject (Get-AlzSortedObject $Definition) -Depth 100
+    ($json -replace "`r`n", "`n").TrimEnd("`n")
+}
+
+function Get-AlzDefinitionFingerprint {
+    # SHA-256 of a definition without everything that the audit conversion may change: the effect parameter, the effect
+    # of the policy rule and the metadata that this package adds. A converted definition has the same fingerprint as its
+    # upstream original, which proves that nothing but the effect handling changed.
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Definition)
+
+    $copy = Copy-AlzObject $Definition
+    $properties = $copy.properties
+    if (-not $properties.Contains('parameters')) { $properties['parameters'] = [ordered]@{} }
+    $then = $properties.policyRule.then
+    if (([string]$then.effect) -match "^\[parameters\('(?<name>[^']+)'\)\]$") { $null = $properties.parameters.Remove($Matches.name) }
+    $null = $then.Remove('effect')
+    if ($properties.Contains('metadata')) {
+        foreach ($key in $script:AlzAddedMetadata) { $null = $properties.metadata.Remove($key) }
+    }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes((Get-AlzCanonicalJson $copy))
+    [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+}
+
+function Test-AlzImageSkuCondition {
+    # True for a condition that tests nothing but Microsoft.Compute/imageSKU: a single condition on that field, or an
+    # anyOf/allOf group made only of such conditions.
+    param($Condition)
+
+    if ($Condition -isnot [System.Collections.IDictionary]) { return $false }
+    if ($Condition.Contains('field')) { return ([string]$Condition['field'] -ieq 'Microsoft.Compute/imageSKU') }
+    foreach ($operator in 'anyOf', 'allOf') {
+        if ($Condition.Contains($operator)) {
+            $members = @($Condition[$operator])
+            return ($members.Count -gt 0 -and @($members | Where-Object { -not (Test-AlzImageSkuCondition $_) }).Count -eq 0)
+        }
+    }
+    return $false
+}
+
+function Remove-AlzImageSkuCondition {
+    # Removes the conditions on Microsoft.Compute/imageSKU, which is how a list of image versions is written, from the
+    # top level of the policy condition. Returns $true when something was removed and $false when nothing is left to
+    # remove, so applying it to an adjusted definition changes nothing.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Edits an in-memory definition only; nothing outside the process changes.')]
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Properties)
+
+    $condition = $Properties['policyRule']['if']
+    if ($condition -isnot [System.Collections.IDictionary] -or -not $condition.Contains('allOf')) { return $false }
+    $all = @($condition['allOf'])
+    $kept = @($all | Where-Object { -not (Test-AlzImageSkuCondition $_) })
+    if ($kept.Count -eq $all.Count) { return $false }
+    if ($kept.Count -eq 0) { throw 'Removing the imageSKU conditions would leave the policy condition empty.' }
+    $condition['allOf'] = $kept
+    return $true
+}
+
+function Get-AlzPolicyRuleAdjustment {
+    # The documented policy rule adjustment of a policy, or $null when it has none.
+    param([Parameter(Mandatory)][string]$Name)
+    if ($script:AlzPolicyRuleAdjustments.ContainsKey($Name)) { $script:AlzPolicyRuleAdjustments[$Name] }
+}
+
+function Invoke-AlzPolicyRuleAdjustment {
+    # Applies an adjustment to definition properties in place and records it in metadata.alzAdjustment. Returns $true
+    # when the policy rule changed. It is idempotent: on an adjusted definition it returns $false and changes nothing.
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Adjustment,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Properties
+    )
+
+    $changed = [bool](& $Adjustment['Apply'] -Properties $Properties)
+    if (-not $Properties.Contains('metadata')) { $Properties['metadata'] = [ordered]@{} }
+    $Properties['metadata']['alzAdjustment'] = $Adjustment['Id']
+    return $changed
 }
 
 function Get-AlzSortedRecord {
@@ -96,33 +229,62 @@ function Get-AlzSortedKey {
     [System.Array]::Sort($keys, [System.StringComparer]::Ordinal)
     $keys
 }
+
 function Get-AlzPolicyRecord {
-    # Loads the definitions folder (including the deprecated sub folder) as records sorted by policy name.
+    # Loads the definition files as records sorted by policy name: the imported ALZ definitions (origin 'upstream',
+    # including the deprecated sub folder) and, when a folder is given, the definitions that are authored in this
+    # repository (origin 'local'). Optional metadata is read defensively because local definitions may omit it.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$DefinitionsPath)
+    param(
+        [Parameter(Mandatory)][string]$DefinitionsPath,
+        [string]$LocalPath
+    )
+
+    $folders = [System.Collections.Generic.List[object]]::new()
+    $folders.Add(@{ Path = $DefinitionsPath; Origin = 'upstream' })
+    if ($LocalPath -and (Test-Path -LiteralPath $LocalPath)) { $folders.Add(@{ Path = $LocalPath; Origin = 'local' }) }
 
     $records = [System.Collections.Generic.List[object]]::new()
-    foreach ($file in Get-ChildItem -LiteralPath $DefinitionsPath -Filter '*.json' -File -Recurse) {
-        $definition = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100
-        $metadata = $definition.properties.metadata
-        $records.Add([pscustomobject]@{
-                Name              = $definition.name
-                Category          = $metadata.category
-                Deprecated        = ($metadata.Contains('deprecated') -and $metadata.deprecated -eq $true)
-                CloudEnvironments = @($metadata.alzCloudEnvironments)
-                File              = $file.FullName
-                Definition        = $definition
-            })
+    foreach ($folder in $folders) {
+        foreach ($file in Get-ChildItem -LiteralPath $folder['Path'] -Filter '*.json' -File -Recurse) {
+            $definition = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+            if ($definition -isnot [System.Collections.IDictionary] -or -not $definition.Contains('name') -or
+                -not $definition.Contains('properties') -or $definition['properties'] -isnot [System.Collections.IDictionary]) {
+                throw "$($file.FullName) is not a policy definition in the { name, type, properties } form."
+            }
+            $metadata = if ($definition['properties'].Contains('metadata')) { $definition['properties']['metadata'] } else { @{} }
+            $records.Add([pscustomobject]@{
+                    Name              = $definition['name']
+                    Origin            = $folder['Origin']
+                    Category          = $(if ($metadata.Contains('category')) { $metadata['category'] } else { '' })
+                    Deprecated        = ($metadata.Contains('deprecated') -and $metadata['deprecated'] -eq $true)
+                    CloudEnvironments = @($(if ($metadata.Contains('alzCloudEnvironments')) { $metadata['alzCloudEnvironments'] }))
+                    File              = $file.FullName
+                    Definition        = $definition
+                })
+        }
     }
+    $duplicates = @($records | Group-Object Name | Where-Object { $_.Count -gt 1 })
+    if ($duplicates.Count -gt 0) { throw "Policy definition name(s) used more than once: $(($duplicates | ForEach-Object { $_.Name }) -join ', ')." }
     Get-AlzSortedRecord -Record $records.ToArray()
 }
 
 function ConvertTo-AlzAuditFirstDefinition {
-    # Returns the definition properties to publish plus a description of how the effect was adapted.
+    # Converts a definition to audit by default and returns its properties plus a description of what was done:
+    #  - the effect parameter defaults to an audit-mode effect (Audit or AuditIfNotExists);
+    #  - that effect is added to the allowed values when the definition did not offer it;
+    #  - a hard-coded effect becomes a parameter, so that it can be switched;
+    #  - the effect that upstream applies by default stays selectable and is kept in metadata.alzUpstreamEffect.
+    # The conversion is idempotent: a definition that is already converted comes back unchanged.
+    # With -Local the definition is authored in this repository and has no upstream: it is never converted silently but
+    # has to audit by default already (effect parameter defaulting to Audit or AuditIfNotExists, and offering that
+    # default), otherwise this throws. No metadata.alzUpstreamEffect is recorded for it.
     [CmdletBinding()]
-    param([Parameter(Mandatory)][System.Collections.IDictionary]$Definition)
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Definition, [switch]$Local)
 
     $properties = Copy-AlzObject $Definition.properties
+    if (-not $properties.Contains('metadata')) { $properties['metadata'] = [ordered]@{} }
+    if (-not $properties.Contains('parameters')) { $properties['parameters'] = [ordered]@{} }
     $then = $properties.policyRule.then
     $effectExpression = [string]$then.effect
     $parameterized = $false
@@ -134,48 +296,55 @@ function ConvertTo-AlzAuditFirstDefinition {
             throw "Effect parameter '$effectParameter' of $($Definition.name) needs allowedValues and a defaultValue."
         }
         $allowed = @($schema.allowedValues | ForEach-Object { Get-AlzCanonicalEffect $_ })
-        $upstreamDefault = Get-AlzCanonicalEffect $schema.defaultValue
+        $originalDefault = Get-AlzCanonicalEffect $schema.defaultValue
     }
     else {
-        # Hard-coded effect: keep it as the default and make it switchable.
+        # Hard-coded effect: make it a parameter that can be switched.
         $effectParameter = 'effect'
-        if ($properties.Contains('parameters') -and $properties.parameters.Contains($effectParameter)) {
+        if ($properties.parameters.Contains($effectParameter)) {
             throw "$($Definition.name) hard-codes its effect but already defines a parameter named 'effect'."
         }
-        $upstreamDefault = Get-AlzCanonicalEffect $effectExpression
-        $allowed = @($upstreamDefault, 'Disabled')
+        $originalDefault = Get-AlzCanonicalEffect $effectExpression
+        $allowed = @($originalDefault, 'Disabled')
         $parameterized = $true
     }
+    # A definition that was converted before remembers the effect that upstream applies by default.
+    $upstreamEffect = if ($properties.metadata.Contains('alzUpstreamEffect')) { Get-AlzCanonicalEffect $properties.metadata.alzUpstreamEffect } else { $originalDefault }
 
     $enforcing = @($allowed | Where-Object { $_ -ne 'Disabled' -and $_ -notin $script:AlzAuditEffects })
-    $auditEffect = $script:AlzAuditEffects | Where-Object { $_ -in $allowed } | Select-Object -First 1
-    if (-not $auditEffect) {
-        $candidates = @($enforcing | ForEach-Object { $script:AlzAuditEffectFor[$_] } | Select-Object -Unique)
-        if ($candidates.Count -ne 1 -or -not $candidates[0]) {
-            throw "Cannot choose an audit-mode effect for $($Definition.name) (effects: $($allowed -join ', '))."
+    if ($Local) {
+        if ($parameterized) { throw "$($Definition.name) is a local definition and must define its effect as a parameter." }
+        if ($originalDefault -notin $script:AlzAuditEffects) { throw "$($Definition.name) is a local definition and must default to Audit or AuditIfNotExists, not $originalDefault." }
+        $auditEffect = $originalDefault
+    }
+    else {
+        $auditEffect = $script:AlzAuditEffects | Where-Object { $_ -in $allowed } | Select-Object -First 1
+        if (-not $auditEffect) {
+            $candidates = @($enforcing | ForEach-Object { $script:AlzAuditEffectFor[$_] } | Select-Object -Unique)
+            if ($candidates.Count -ne 1 -or -not $candidates[0]) {
+                throw "Cannot choose an audit-mode effect for $($Definition.name) (effects: $($allowed -join ', '))."
+            }
+            $auditEffect = $candidates[0]
         }
-        $auditEffect = $candidates[0]
     }
     $extended = $auditEffect -notin $allowed
+    if ($extended -and $Local) { throw "$($Definition.name) is a local definition and must list its default effect $auditEffect in the allowed values of its effect parameter." }
     if ($extended) { $allowed = @($auditEffect) + $allowed }
 
     if ($parameterized) {
-        $effectSchema = [ordered]@{
-            type          = 'String'
-            metadata      = [ordered]@{ displayName = 'Effect'; description = 'Enable or disable the execution of the policy' }
+        $properties.parameters[$effectParameter] = [ordered]@{
             allowedValues = $allowed
-            defaultValue  = $upstreamDefault
+            defaultValue  = $auditEffect
+            metadata      = [ordered]@{ description = 'Enable or disable the execution of the policy'; displayName = 'Effect' }
+            type          = 'String'
         }
-        $parameters = [ordered]@{ $effectParameter = $effectSchema }
-        if ($properties.Contains('parameters')) {
-            foreach ($key in $properties.parameters.Keys) { $parameters[$key] = $properties.parameters[$key] }
-        }
-        $properties['parameters'] = $parameters
         $then['effect'] = "[parameters('$effectParameter')]"
     }
     else {
-        $schema['allowedValues'] = $allowed
+        if ($extended) { $schema['allowedValues'] = @($auditEffect) + @($schema.allowedValues) }
+        $schema['defaultValue'] = $auditEffect
     }
+    if (-not $Local) { $properties.metadata['alzUpstreamEffect'] = $upstreamEffect }
 
     $roleNames = @()
     if ($then.Contains('details') -and $then.details -is [System.Collections.IDictionary] -and $then.details.Contains('roleDefinitionIds')) {
@@ -193,7 +362,8 @@ function ConvertTo-AlzAuditFirstDefinition {
         AuditEffect           = $auditEffect
         AllowedEffects        = $allowed
         EnforcingEffects      = $enforcing
-        UpstreamDefault       = $upstreamDefault
+        UpstreamEffect        = $upstreamEffect
+        DefaultChanged        = ($originalDefault -ne $auditEffect)
         EffectParameterized   = $parameterized
         AllowedValuesExtended = ($extended -and -not $parameterized)
         RoleNames             = $roleNames
@@ -248,7 +418,8 @@ function Build-AlzPolicyPackage {
     $keys = @{}
 
     foreach ($item in (Get-AlzSortedRecord -Record $Record)) {
-        $adapted = ConvertTo-AlzAuditFirstDefinition -Definition $item.Definition
+        $isLocal = $item.Origin -eq 'local'
+        $adapted = ConvertTo-AlzAuditFirstDefinition -Definition $item.Definition -Local:$isLocal
         $key = ConvertTo-AlzKey $item.Name
         if ($keys.ContainsKey($key)) { throw "Policies '$($keys[$key])' and '$($item.Name)' map to the same parameter prefix '$key'." }
         $keys[$key] = $item.Name
@@ -298,7 +469,7 @@ function Build-AlzPolicyPackage {
         $metadata = $adapted.Properties.metadata
         $metadata['managedBy'] = $script:AlzManagedBy
         $metadata['alzName'] = $item.Name
-        $metadata['alzLibraryVersion'] = $Source.version
+        if ($isLocal) { $metadata['alzOrigin'] = 'local' } else { $metadata['alzLibraryVersion'] = $Source.version }
 
         $definitionName = Get-AlzDefinitionName -Prefix $DefinitionPrefix -Name $item.Name
         $definitionId = "$Scope/providers/Microsoft.Authorization/policyDefinitions/$definitionName"
@@ -319,7 +490,7 @@ function Build-AlzPolicyPackage {
 
     $initiative = [ordered]@{
         displayName       = $DisplayName
-        description       = "All custom Azure Landing Zones policies in one initiative. Every policy audits by default (Audit, AuditIfNotExists or AuditAction); switch a policy to Deny, DeployIfNotExists, Modify, Append or DenyAction through its <policy>_effect parameter when assigning. ALZ Library $($Source.version)."
+        description       = "All custom Azure Landing Zones policies in one initiative. Every policy audits by default (Audit or AuditIfNotExists); switch a policy to Deny, DeployIfNotExists, Modify, Append or DenyAction through its <policy>_effect parameter when assigning. ALZ Library $($Source.version)."
         policyType        = 'Custom'
         metadata          = [ordered]@{
             category          = 'Azure Landing Zones'
@@ -368,7 +539,6 @@ function Test-AlzPolicyPackage {
         $name = $definition.PolicyName
         try {
             $adapted = $definition.Adapted
-            $upstream = $definition.Record.Definition.properties
             $properties = $definition.Properties
 
             if ($definition.Name.Length -gt 64 -or $definition.Name -match '[#<>%&:\\?/\p{Cc}]' -or $definition.Name -match '[. ]$') {
@@ -383,29 +553,12 @@ function Test-AlzPolicyPackage {
             $effectSchema = $properties.parameters[$adapted.EffectParameter]
             if ($effectSchema.type -ne 'String') { $problems.Add("${name}: the effect parameter must be a String.") }
             if (@($effectSchema.allowedValues) -notcontains $effectSchema.defaultValue) { $problems.Add("${name}: the default effect is not an allowed value.") }
-            if ($effectSchema.defaultValue -ne $adapted.UpstreamDefault) { $problems.Add("${name}: the definition default changed from $($adapted.UpstreamDefault).") }
-            if ($adapted.AuditEffect -notin @($effectSchema.allowedValues)) { $problems.Add("${name}: the audit-mode effect $($adapted.AuditEffect) is not allowed.") }
+            if ($effectSchema.defaultValue -notin $script:AlzAuditEffects -or $effectSchema.defaultValue -ne $adapted.AuditEffect) {
+                $problems.Add("${name}: the definition must default to its audit-mode effect $($adapted.AuditEffect), not '$($effectSchema.defaultValue)'.")
+            }
             if ('Disabled' -notin @($effectSchema.allowedValues)) { $problems.Add("${name}: Disabled must stay allowed.") }
-            if (-not $adapted.EffectParameterized) {
-                $removed = @($upstream.parameters[$adapted.EffectParameter].allowedValues | Where-Object { $_ -notin @($effectSchema.allowedValues) })
-                if ($removed.Count -gt 0) { $problems.Add("${name}: upstream effects were removed from the allowed values: $($removed -join ', ').") }
-            }
-
-            # Only the effect handling may differ from the upstream definition.
-            foreach ($key in $upstream.Keys) {
-                if ($key -in 'metadata', 'parameters', 'policyRule') { continue }
-                if ((Get-AlzCanonicalJson $upstream[$key]) -ne (Get-AlzCanonicalJson $properties[$key])) { $problems.Add("${name}: property '$key' differs from upstream.") }
-            }
-            if ((Get-AlzCanonicalJson $upstream.policyRule['if']) -ne (Get-AlzCanonicalJson $properties.policyRule['if'])) { $problems.Add("${name}: the policy condition differs from upstream.") }
-            foreach ($key in $upstream.policyRule.then.Keys) {
-                if ($key -eq 'effect') { continue }
-                if ((Get-AlzCanonicalJson $upstream.policyRule.then[$key]) -ne (Get-AlzCanonicalJson $properties.policyRule.then[$key])) { $problems.Add("${name}: then.$key differs from upstream.") }
-            }
-            $upstreamParameters = if ($upstream.Contains('parameters')) { $upstream.parameters } else { @{} }
-            foreach ($key in $upstreamParameters.Keys) {
-                if ($key -eq $adapted.EffectParameter) { continue }
-                if ((Get-AlzCanonicalJson $upstreamParameters[$key]) -ne (Get-AlzCanonicalJson $properties.parameters[$key])) { $problems.Add("${name}: parameter '$key' differs from upstream.") }
-            }
+            if ($adapted.UpstreamEffect -notin @($effectSchema.allowedValues)) { $problems.Add("${name}: the upstream effect $($adapted.UpstreamEffect) is no longer selectable.") }
+            if ($definition.Record.Origin -eq 'upstream' -and $properties.metadata.alzUpstreamEffect -ne $adapted.UpstreamEffect) { $problems.Add("${name}: metadata.alzUpstreamEffect is missing or wrong.") }
         }
         catch {
             $problems.Add("${name}: the definition is malformed ($($_.Exception.Message)).")
@@ -477,6 +630,87 @@ function Test-AlzPolicyPackage {
 
     $problems.ToArray()
 }
+
+function Test-AlzStoredDefinition {
+    # Checks one imported definition file against the import manifest. Returns a list of problems (empty when it is
+    # sound): it must be in converted form (the conversion changes nothing), record its upstream effect, and equal the
+    # upstream original in everything but the effect handling (fingerprint). A definition with a documented policy rule
+    # adjustment must also be in adjusted form and match the fingerprint that the import recorded for the adjusted result.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Record, [Parameter(Mandatory)][System.Collections.IDictionary]$Source)
+
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $name = $Record.Name
+    try {
+        $stored = $Record.Definition
+        $converted = ConvertTo-AlzAuditFirstDefinition -Definition $stored
+        $effectSchema = $stored.properties.parameters[$converted.EffectParameter]
+
+        if ($stored.properties.policyRule.then.effect -ne "[parameters('$($converted.EffectParameter)')]") { $problems.Add("${name}: the effect is not a parameter.") }
+        if ($effectSchema.defaultValue -notin $script:AlzAuditEffects) { $problems.Add("${name}: defaults to '$($effectSchema.defaultValue)', not to an audit-mode effect.") }
+        if (-not $stored.properties.metadata.Contains('alzUpstreamEffect')) { $problems.Add("${name}: metadata.alzUpstreamEffect is missing.") }
+        elseif ($converted.UpstreamEffect -notin @($effectSchema.allowedValues)) { $problems.Add("${name}: the upstream effect $($converted.UpstreamEffect) is not selectable.") }
+        if ((Get-AlzCanonicalJson $converted.Properties) -ne (Get-AlzCanonicalJson $stored.properties)) { $problems.Add("${name}: not in audit-by-default form; run Import-AlzPolicy.ps1.") }
+
+        $conversion = if ($Source.Contains('conversion')) { $Source.conversion } else { @{} }
+        $adjustment = Get-AlzPolicyRuleAdjustment -Name $name
+        $recorded = if ($conversion.Contains('adjustments') -and $conversion.adjustments.Contains($name)) { $conversion.adjustments[$name] } else { $null }
+        $storedAdjustment = if ($stored.properties.metadata.Contains('alzAdjustment')) { $stored.properties.metadata.alzAdjustment } else { $null }
+
+        $expected = $null
+        if ($adjustment) {
+            if ($storedAdjustment -ne $adjustment.Id) { $problems.Add("${name}: metadata.alzAdjustment should be '$($adjustment.Id)'.") }
+            $copy = Copy-AlzObject $stored.properties
+            if (Invoke-AlzPolicyRuleAdjustment -Adjustment $adjustment -Properties $copy) { $problems.Add("${name}: the policy rule is not adjusted ($($adjustment.Id)); run Import-AlzPolicy.ps1.") }
+            if ($null -eq $recorded) { $problems.Add("${name}: alz-library-source.json does not record the adjustment $($adjustment.Id).") }
+            else {
+                if ($recorded.id -ne $adjustment.Id -or $recorded.description -ne $adjustment.Description) { $problems.Add("${name}: the adjustment in alz-library-source.json is out of date; run Import-AlzPolicy.ps1.") }
+                $expected = $recorded.adjustedFingerprint
+            }
+        }
+        else {
+            if ($null -ne $storedAdjustment) { $problems.Add("${name}: metadata.alzAdjustment is '$storedAdjustment', but no such adjustment is defined in AlzPolicy.Common.ps1.") }
+            if ($null -ne $recorded) { $problems.Add("${name}: alz-library-source.json records an adjustment that is not defined in AlzPolicy.Common.ps1.") }
+            if ($conversion.Contains('upstreamFingerprints') -and $conversion.upstreamFingerprints.Contains($name)) { $expected = $conversion.upstreamFingerprints[$name] }
+        }
+        if (-not $expected) { $problems.Add("${name}: no fingerprint in alz-library-source.json.") }
+        elseif ((Get-AlzDefinitionFingerprint -Definition $stored) -ne $expected) {
+            $problems.Add("${name}: differs from the $(if ($adjustment) { 'recorded adjusted' } else { 'upstream' }) definition in more than its effect handling.")
+        }
+    }
+    catch {
+        $problems.Add("${name}: the definition is malformed ($($_.Exception.Message)).")
+    }
+    $problems.ToArray()
+}
+
+function Test-AlzLocalDefinition {
+    # Checks one definition that is authored in this repository (local-definitions/). It is never converted, so it has
+    # to audit by default already: an effect parameter that defaults to Audit or AuditIfNotExists, offers that default
+    # and Disabled, and uses only documented effects. Returns a list of problems (empty when it is sound).
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Record)
+
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $name = $Record.Name
+    try {
+        $stored = $Record.Definition
+        $properties = $stored.properties
+        if (-not $stored.Contains('type') -or $stored.type -ne 'Microsoft.Authorization/policyDefinitions') { $problems.Add("${name}: type must be Microsoft.Authorization/policyDefinitions.") }
+        if (-not $properties.Contains('policyType') -or $properties.policyType -ne 'Custom') { $problems.Add("${name}: policyType must be Custom.") }
+        $converted = ConvertTo-AlzAuditFirstDefinition -Definition $stored -Local
+        $effectSchema = $properties.parameters[$converted.EffectParameter]
+        if ($effectSchema.type -ne 'String') { $problems.Add("${name}: the effect parameter must be a String.") }
+        if ('Disabled' -notin @($effectSchema.allowedValues)) { $problems.Add("${name}: the effect parameter must allow Disabled.") }
+        $reserved = @(($script:AlzAddedMetadata + 'alzOrigin') | Where-Object { $properties.Contains('metadata') -and $properties.metadata.Contains($_) })
+        if ($reserved.Count -gt 0) { $problems.Add("${name}: metadata $($reserved -join ', ') is set by the package; remove it from the file.") }
+    }
+    catch {
+        $problems.Add("${name}: $($_.Exception.Message)")
+    }
+    $problems.ToArray()
+}
+
 function Format-AlzPolicyCatalog {
     # Markdown catalog of every imported policy and every initiative parameter. Generated; do not edit by hand.
     [CmdletBinding()]
@@ -491,25 +725,42 @@ function Format-AlzPolicyCatalog {
             Display    = $adapted.DisplayName
             Category   = $definition.Record.Category
             Deprecated = $definition.Record.Deprecated
+            Origin     = $definition.Record.Origin
             Default    = $adapted.AuditEffect
             SwitchTo   = @($adapted.AllowedEffects | Where-Object { $_ -ne 'Disabled' -and $_ -ne $adapted.AuditEffect }) -join ', '
             Roles      = (@($adapted.RoleNames | Select-Object -Unique | Sort-Object { $_ } -Culture ([cultureinfo]::InvariantCulture) -CaseSensitive)) -join ', '
             Parameter  = "$(ConvertTo-AlzKey $definition.PolicyName)_effect"
-            Upstream   = $adapted.UpstreamDefault
-            Extended   = $adapted.AllowedValuesExtended
-            Static     = $adapted.EffectParameterized
+            Upstream   = $(if ($definition.Record.Origin -eq 'local') { 'n/a (local)' } else { $adapted.UpstreamEffect })
         }
     }
+    $upstreamRows = @($rows | Where-Object { $_.Origin -eq 'upstream' })
+    $localRows = @($rows | Where-Object { $_.Origin -eq 'local' })
+    $localNames = @($localRows | ForEach-Object { $_.Name })
     $active = @($rows | Where-Object { -not $_.Deprecated })
     $deprecated = @($rows | Where-Object { $_.Deprecated })
+    $upstreamActive = @($upstreamRows | Where-Object { -not $_.Deprecated })
+    $converted = @($upstreamRows | Where-Object { $_.Upstream -ne $_.Default })
+    $convertedActive = @($converted | Where-Object { -not $_.Deprecated })
+    $details = if ($Source.Contains('conversion')) { $Source.conversion } else { @{} }
+    $extended = if ($details.Contains('auditEffectAdded')) { $details.auditEffectAdded } else { 0 }
+    $parameterized = if ($details.Contains('effectParameterized')) { $details.effectParameterized } else { 0 }
+    $adjustments = if ($details.Contains('adjustments')) { $details['adjustments'] } else { @{} }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add('# ALZ custom policy catalog')
     $lines.Add('')
     $lines.Add("Generated by ``Import-AlzPolicy.ps1`` from $($Source.repository) at ``$($Source.ref)`` (commit ``$($Source.commit)``). Do not edit by hand.")
     $lines.Add('')
-    $lines.Add("- **$($rows.Count)** custom policy definitions imported: **$($active.Count)** active and **$($deprecated.Count)** deprecated upstream. Deprecated ones are published only with ``-IncludeDeprecated``.")
-    $lines.Add("- Every policy audits by default and also accepts ``Disabled``. **$(@($rows | Where-Object Extended).Count)** definitions get an audit-mode effect added to their allowed values and **$(@($rows | Where-Object Static).Count)** turn a hard-coded effect into a parameter whose default stays the upstream effect.")
+    $lines.Add("- **$($upstreamRows.Count)** custom policy definitions imported from ALZ: **$($upstreamActive.Count)** active and **$($upstreamRows.Count - $upstreamActive.Count)** deprecated upstream. Deprecated ones are published only with ``-IncludeDeprecated``.")
+    if ($localRows.Count -gt 0) {
+        $localList = ($localRows | ForEach-Object { '`' + $_.Name + '`' }) -join ', '
+        $lines.Add("- **$($localRows.Count)** local definition(s) authored in this repository (``local-definitions/``), not imported from ALZ: $localList. They audit by default like the others, are part of the initiative and are never touched by the import.")
+    }
+    $lines.Add("- Every imported definition is converted to audit by default. **$($converted.Count)** of them (**$($convertedActive.Count)** active) applied an enforcing effect upstream (Deny, DeployIfNotExists, Modify, Append or DenyAction); the others already audited. The **Default** column is the effect that applies unless you choose another one, both when a definition is assigned on its own and through the initiative. The upstream effect stays selectable, is shown as **Upstream default** and is recorded in each definition's ``metadata.alzUpstreamEffect``. Every policy also accepts ``Disabled``.")
+    $lines.Add("- To default to audit, **$extended** of the $($upstreamRows.Count) imported definitions got an audit-mode effect added to their allowed values and **$parameterized** turned a hard-coded effect into a parameter.")
+    if ($adjustments.Count -gt 0) {
+        $lines.Add("- **$($adjustments.Count)** imported policy rule(s) are adjusted compared to upstream (see [Adjusted policy rules](#adjusted-policy-rules)); every other policy rule is upstream's.")
+    }
     $lines.Add('- Effect parameter name: the policy name with every non-alphanumeric character replaced by `_`, followed by `_effect`.')
     $lines.Add('- The roles column lists what the assignment identity needs when the policy is switched to a deploying or modifying effect.')
     $lines.Add('')
@@ -517,12 +768,25 @@ function Format-AlzPolicyCatalog {
     $render = {
         param($items)
         $out = [System.Collections.Generic.List[string]]::new()
-        $out.Add('| Policy | Display name | Category | Default | Switch to | Roles for Deploy/Modify | Effect parameter |')
-        $out.Add('| --- | --- | --- | --- | --- | --- | --- |')
+        $out.Add('| Policy | Display name | Category | Default | Upstream default | Switch to | Roles for Deploy/Modify | Effect parameter |')
+        $out.Add('| --- | --- | --- | --- | --- | --- | --- | --- |')
         foreach ($row in $items) {
-            $out.Add("| ``$($row.Name)`` | $(& $escape $row.Display) | $($row.Category) | $($row.Default) | $($row.SwitchTo) | $($row.Roles) | ``$($row.Parameter)`` |")
+            $out.Add("| ``$($row.Name)`` | $(& $escape $row.Display) | $($row.Category) | $($row.Default) | $($row.Upstream) | $($row.SwitchTo) | $($row.Roles) | ``$($row.Parameter)`` |")
         }
         $out
+    }
+
+    if ($adjustments.Count -gt 0) {
+        $lines.Add('## Adjusted policy rules')
+        $lines.Add('')
+        $lines.Add('Deliberate changes to an imported policy rule. `Import-AlzPolicy.ps1` applies them and records each one in `metadata.alzAdjustment` of the definition and in `alz-library-source.json`. The import fails when an adjustment no longer finds anything to change, so each one is reviewed against every new upstream release.')
+        $lines.Add('')
+        $lines.Add('| Policy | Adjustment | What changed |')
+        $lines.Add('| --- | --- | --- |')
+        foreach ($adjusted in $adjustments.GetEnumerator()) {
+            $lines.Add("| ``$($adjusted.Key)`` | ``$($adjusted.Value['id'])`` | $(& $escape $adjusted.Value['description']) |")
+        }
+        $lines.Add('')
     }
 
     $lines.Add("## Active policies ($($active.Count))")
@@ -543,7 +807,7 @@ function Format-AlzPolicyCatalog {
     $deprecatedNames = @($deprecated | ForEach-Object { $_.Name })
     $lines.Add("## Other initiative parameters ($($usage.Count))")
     $lines.Add('')
-    $lines.Add('Parameters that are not effects. Those marked *placeholder* have no upstream default, so an empty value is used until you set one; it only matters once the policy is switched to a deploying effect. Parameters used only by deprecated policies exist only with `-IncludeDeprecated`.')
+    $lines.Add('Parameters that are not effects. Those marked *placeholder* have no default in their definition, so an empty value is used until you set one; it only matters once the policy is switched to a deploying effect. Those marked *local* belong to a local definition, the others to an imported one. Parameters used only by deprecated policies exist only with `-IncludeDeprecated`.')
     $lines.Add('')
     $lines.Add('| Initiative parameter | Used by | Type | Default | Origin |')
     $lines.Add('| --- | --- | --- | --- | --- |')
@@ -551,7 +815,7 @@ function Format-AlzPolicyCatalog {
         $schema = $package.Initiative.Properties.parameters[$entry.Key]
         $default = (ConvertTo-Json -InputObject $schema.defaultValue -Compress -Depth 20)
         if ($default.Length -gt 80) { $default = $default.Substring(0, 77) + '...' }
-        $origin = if ($schema.metadata.Contains('alzPlaceholderDefault')) { 'placeholder' } else { 'upstream' }
+        $origin = if ($schema.metadata.Contains('alzPlaceholderDefault')) { 'placeholder' } elseif (@($entry.Value | Where-Object { $_ -notin $localNames }).Count -eq 0) { 'local' } else { 'upstream' }
         $activeUsers = @($entry.Value | Where-Object { $_ -notin $deprecatedNames })
         $deprecatedUsers = @($entry.Value | Where-Object { $_ -in $deprecatedNames })
         $usedBy = [System.Collections.Generic.List[string]]::new()

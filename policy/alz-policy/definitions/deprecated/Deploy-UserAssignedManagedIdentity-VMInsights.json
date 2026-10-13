@@ -9,6 +9,7 @@
         "AzureChinaCloud",
         "AzureUSGovernment"
       ],
+      "alzUpstreamEffect": "DeployIfNotExists",
       "category": "Managed Identity",
       "deprecated": true,
       "source": "https://github.com/Azure/Enterprise-Scale/",
@@ -41,7 +42,7 @@
           "DeployIfNotExists",
           "Disabled"
         ],
-        "defaultValue": "DeployIfNotExists",
+        "defaultValue": "AuditIfNotExists",
         "metadata": {
           "description": "The effect determines what happens when the policy rule is evaluated to match.",
           "displayName": "Policy Effect"

@@ -5,10 +5,14 @@
     Publishes the Azure Landing Zones (ALZ) custom policies as one audit-first initiative.
 
 .DESCRIPTION
-    Publishes the policy definitions from ./definitions and a single policy set definition (initiative) that references
-    all of them, at a management group or subscription. In the initiative every policy defaults to an audit-mode effect
-    (Audit, AuditIfNotExists or AuditAction). Each policy has its own <policy>_effect initiative parameter, so an
-    assignment can switch any policy to Deny, DeployIfNotExists, Modify, Append, DenyAction or Disabled.
+    Publishes the policy definitions from ./definitions and ./local-definitions and a single policy set definition
+    (initiative) that references all of them, at a management group or subscription. The definitions in ./definitions
+    are the ALZ policies converted to audit by default (see Import-AlzPolicy.ps1): each one defaults to Audit or
+    AuditIfNotExists instead of the Deny, DeployIfNotExists, Modify, Append or DenyAction that upstream applies, so even
+    a definition that is assigned on its own audits. The definitions in ./local-definitions are authored in this
+    repository and audit by default as well. The initiative defaults to the same effects. Each policy has its own
+    <policy>_effect initiative parameter, so an assignment can switch any policy to Deny, DeployIfNotExists, Modify,
+    Append, DenyAction or Disabled.
 
     No assignment is created. Re-running the script updates what it published earlier; it refuses to overwrite
     definitions or an initiative that it did not publish (identified by metadata.managedBy).
@@ -42,7 +46,7 @@
     Also publish the policies that are flagged deprecated upstream.
 
 .PARAMETER ExcludePolicy
-    Upstream policy names (for example Deny-Storage-SFTP) to leave out of the definitions and the initiative.
+    Policy names (for example Deny-Storage-SFTP) to leave out of the definitions and the initiative.
 
 .PARAMETER OutputPath
     Also write the generated definition and initiative JSON to this folder.
@@ -128,7 +132,7 @@ $scope = if ($bySubscription) { "/subscriptions/$SubscriptionId" } else { "/prov
 
 # ---- Select and generate (offline) ---------------------------------------------------------------------------------
 $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'alz-library-source.json') -Raw | ConvertFrom-Json -AsHashtable
-$allRecords = @(Get-AlzPolicyRecord -DefinitionsPath (Join-Path $PSScriptRoot 'definitions'))
+$allRecords = @(Get-AlzPolicyRecord -DefinitionsPath (Join-Path $PSScriptRoot 'definitions') -LocalPath (Join-Path $PSScriptRoot 'local-definitions'))
 if ($allRecords.Count -eq 0) { throw 'No policy definitions found. Run ./Import-AlzPolicy.ps1 first.' }
 
 $unknownExclusions = @($ExcludePolicy | Where-Object { $_ -notin $allRecords.Name })

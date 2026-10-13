@@ -7,6 +7,7 @@
       "alzCloudEnvironments": [
         "AzureCloud"
       ],
+      "alzUpstreamEffect": "DeployIfNotExists",
       "category": "Monitoring",
       "deprecated": true,
       "source": "https://github.com/Azure/Enterprise-Scale/",
@@ -16,10 +17,11 @@
     "parameters": {
       "effect": {
         "allowedValues": [
+          "AuditIfNotExists",
           "DeployIfNotExists",
           "Disabled"
         ],
-        "defaultValue": "DeployIfNotExists",
+        "defaultValue": "AuditIfNotExists",
         "metadata": {
           "description": "Enable or disable the execution of the policy",
           "displayName": "Effect"

@@ -5,10 +5,12 @@
     Offline checks for the ALZ policy package. Needs no Azure access.
 
 .DESCRIPTION
-    Verifies the imported definitions, the generated audit-first initiative, the generated catalog, and runs
-    Deploy-AlzPolicy.ps1 end to end against an in-memory stand-in for Azure Resource Manager that applies the same kind
-    of validation the Policy service does (effect parameter, allowed values, parameter bindings, referenced definitions).
-    Exits with a non-zero code when a check fails. Run it after every ./Import-AlzPolicy.ps1.
+    Verifies that every imported definition audits by default and still equals its upstream original in everything but
+    the effect handling and the documented policy rule adjustments (fingerprints from the import), that every local
+    definition (local-definitions/) audits by default as well, the generated audit-first initiative, the generated
+    catalog, and runs Deploy-AlzPolicy.ps1 end to end against an in-memory stand-in for Azure Resource Manager that
+    applies the same kind of validation the Policy service does (effect values, allowed values, parameter bindings,
+    referenced definitions). Exits with a non-zero code when a check fails. Run it after every ./Import-AlzPolicy.ps1.
 
 .EXAMPLE
     ./Test-AlzPolicy.ps1
@@ -34,17 +36,24 @@ function Assert-That {
 
 function Write-Section { param([string]$Title) Write-Host "`n$Title" -ForegroundColor Cyan }
 
+# Order-independent text of a list. Parenthesise the call in comparisons: `-join` and `-eq` have the same precedence,
+# so `$a -join ',' -eq $b -join ','` would not compare the two lists.
+function Get-SortedList { param($Values) (@($Values) | Sort-Object { $_ }) -join ',' }
+
 $deployScript = Join-Path $PSScriptRoot 'Deploy-AlzPolicy.ps1'
 $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'alz-library-source.json') -Raw | ConvertFrom-Json -AsHashtable
-$records = @(Get-AlzPolicyRecord -DefinitionsPath (Join-Path $PSScriptRoot 'definitions'))
+$records = @(Get-AlzPolicyRecord -DefinitionsPath (Join-Path $PSScriptRoot 'definitions') -LocalPath (Join-Path $PSScriptRoot 'local-definitions'))
+$upstreamRecords = @($records | Where-Object { $_.Origin -eq 'upstream' })
+$localRecords = @($records | Where-Object { $_.Origin -eq 'local' })
 $activeRecords = @($records | Where-Object { -not $_.Deprecated })
+$upstreamActive = @($upstreamRecords | Where-Object { -not $_.Deprecated })
 $scope = '/providers/Microsoft.Management/managementGroups/contoso'
 
 # ---- 1. Imported definitions -------------------------------------------------------------------------------------------
 Write-Section 'Imported definitions'
-Assert-That ($records.Count -eq $source.definitions.total) "Imported $($records.Count) definitions but alz-library-source.json says $($source.definitions.total)."
-Assert-That ($activeRecords.Count -eq $source.definitions.active) "Found $($activeRecords.Count) active definitions, expected $($source.definitions.active)."
-Assert-That (($records.Count - $activeRecords.Count) -eq $source.definitions.deprecated) 'The deprecated definition count differs from alz-library-source.json.'
+Assert-That ($upstreamRecords.Count -eq $source.definitions.total) "Imported $($upstreamRecords.Count) definitions but alz-library-source.json says $($source.definitions.total)."
+Assert-That ($upstreamActive.Count -eq $source.definitions.active) "Found $($upstreamActive.Count) active imported definitions, expected $($source.definitions.active)."
+Assert-That (($upstreamRecords.Count - $upstreamActive.Count) -eq $source.definitions.deprecated) 'The deprecated definition count differs from alz-library-source.json.'
 Assert-That (@($records.Name | Sort-Object -Unique).Count -eq $records.Count) 'Policy names are not unique.'
 foreach ($record in $records) {
     $leaf = Split-Path -Leaf $record.File
@@ -54,6 +63,211 @@ foreach ($record in $records) {
     Assert-That ($record.Definition.type -eq 'Microsoft.Authorization/policyDefinitions' -and $record.Definition.properties.policyType -eq 'Custom') "$($record.Name) is not a custom policy definition."
 }
 Assert-That (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'LICENSE-Azure-Landing-Zones-Library.txt')) 'The upstream licence copy is missing.'
+
+# ---- 1b. Audit by default ----------------------------------------------------------------------------------------------
+Write-Section 'Audit by default (every definition)'
+$auditSet = @('Audit', 'AuditIfNotExists')
+$upstreamEnforcing = 0
+foreach ($record in $records) {
+    $properties = $record.Definition.properties
+    $expression = [string]$properties.policyRule.then.effect
+    $isParameter = $expression -match "^\[parameters\('(?<name>[^']+)'\)\]$"
+    Assert-That $isParameter "$($record.Name) hard-codes its effect '$expression'; it must be a parameter."
+    if (-not $isParameter) { continue }
+    $schema = $properties.parameters[$Matches.name]
+    Assert-That ($schema.defaultValue -in $auditSet) "$($record.Name) defaults to '$($schema.defaultValue)', not to Audit or AuditIfNotExists."
+    Assert-That ('AuditAction' -notin @($schema.allowedValues)) "$($record.Name) offers AuditAction, which is not a documented Azure Policy effect."
+    Assert-That ('Disabled' -in @($schema.allowedValues) -and $schema.defaultValue -in @($schema.allowedValues)) "$($record.Name): the allowed effects are inconsistent."
+    if ($record.Origin -ne 'upstream') { continue }
+    $upstreamEffect = if ($properties.metadata.Contains('alzUpstreamEffect')) { $properties.metadata.alzUpstreamEffect } else { $null }
+    Assert-That ($null -ne $upstreamEffect -and $upstreamEffect -in @($schema.allowedValues)) "$($record.Name): the upstream effect '$upstreamEffect' must be recorded and stay selectable."
+    if ($upstreamEffect -notin $auditSet) { $upstreamEnforcing++ }
+}
+Assert-That ($upstreamEnforcing -eq $source.conversion.defaultChanged) "alz-library-source.json counts $($source.conversion.defaultChanged) converted defaults but the definitions record $upstreamEnforcing."
+Assert-That ($upstreamEnforcing -gt 0) 'At least one definition should have applied an enforcing effect upstream.'
+
+$examples = @(
+    @{ Name = 'Deny-Storage-CopyScope'; Default = 'Audit'; Upstream = 'Deny'; Allowed = 'Audit', 'Deny', 'Disabled' }
+    @{ Name = 'Deploy-Storage-sslEnforcement'; Default = 'AuditIfNotExists'; Upstream = 'DeployIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+    @{ Name = 'Modify-NSG'; Default = 'Audit'; Upstream = 'Modify'; Allowed = 'Audit', 'Modify', 'Disabled' }
+    @{ Name = 'Deploy-Budget'; Default = 'AuditIfNotExists'; Upstream = 'DeployIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+    @{ Name = 'Audit-AzureHybridBenefit'; Default = 'Audit'; Upstream = 'Audit'; Allowed = 'Audit', 'Disabled' }
+    @{ Name = 'Deploy-Diagnostics-LogAnalytics'; Default = 'AuditIfNotExists'; Upstream = 'DeployIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+    # Effect hard-coded upstream: it becomes a parameter that defaults to audit. DenyAction audits with plain Audit.
+    @{ Name = 'Append-KV-SoftDelete'; Default = 'Audit'; Upstream = 'Append'; Allowed = 'Audit', 'Append', 'Disabled' }
+    @{ Name = 'DenyAction-DiagnosticLogs'; Default = 'Audit'; Upstream = 'DenyAction'; Allowed = 'Audit', 'DenyAction', 'Disabled' }
+    @{ Name = 'DenyAction-ActivityLogs'; Default = 'Audit'; Upstream = 'DenyAction'; Allowed = 'Audit', 'DenyAction', 'Disabled' }
+    @{ Name = 'DenyAction-DeleteResources'; Default = 'Audit'; Upstream = 'DenyAction'; Allowed = 'Audit', 'DenyAction', 'Disabled' }
+    @{ Name = 'Deploy-Vm-autoShutdown'; Default = 'AuditIfNotExists'; Upstream = 'DeployIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+    @{ Name = 'Deploy-VNET-HubSpoke'; Default = 'AuditIfNotExists'; Upstream = 'DeployIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+)
+foreach ($example in $examples) {
+    $record = $records | Where-Object Name -eq $example.Name | Select-Object -First 1
+    Assert-That ($null -ne $record) "$($example.Name) is not imported."
+    if ($null -eq $record) { continue }
+    $properties = $record.Definition.properties
+    $schema = $properties.parameters['effect']
+    Assert-That ($properties.policyRule.then.effect -eq "[parameters('effect')]") "$($example.Name) should use the effect parameter."
+    Assert-That ($schema.defaultValue -eq $example.Default) "$($example.Name) should default to $($example.Default), not $($schema.defaultValue)."
+    Assert-That ($properties.metadata.alzUpstreamEffect -eq $example.Upstream) "$($example.Name) should record upstream effect $($example.Upstream)."
+    Assert-That ((Get-SortedList $schema.allowedValues) -eq (Get-SortedList $example.Allowed)) "$($example.Name) should allow $($example.Allowed -join ', ')."
+}
+
+Write-Section 'Stored definitions against the import manifest'
+Assert-That (@($source.conversion.upstreamFingerprints.Keys).Count -eq $upstreamRecords.Count) 'alz-library-source.json must hold one upstream fingerprint per imported definition.'
+foreach ($record in $upstreamRecords) {
+    $problems = @(Test-AlzStoredDefinition -Record $record -Source $source)
+    Assert-That ($problems.Count -eq 0) "Stored definition problems: $($problems -join ' | ')"
+}
+# ---- 1d. Documented policy rule adjustments ------------------------------------------------------------------------------
+Write-Section 'Policy rule adjustments'
+$adjustedNames = @($source.conversion.adjustments.Keys)
+Assert-That ($source.conversion.policyRuleAdjusted -eq $adjustedNames.Count) 'alz-library-source.json counts a different number of adjustments than it lists.'
+Assert-That ((Get-SortedList $adjustedNames) -eq (Get-SortedList @($script:AlzPolicyRuleAdjustments.Keys))) 'The adjustments in alz-library-source.json differ from those defined in AlzPolicy.Common.ps1.'
+
+$ahub = $upstreamRecords | Where-Object Name -eq 'Audit-AzureHybridBenefit' | Select-Object -First 1
+Assert-That ($null -ne $ahub) 'Audit-AzureHybridBenefit is not imported.'
+if ($null -ne $ahub) {
+    $ahubRule = Get-AlzCanonicalJson $ahub.Definition.properties.policyRule['if']
+    Assert-That ($ahubRule -notmatch 'imageSKU') 'The Audit-AzureHybridBenefit rule must not test the image SKU, which is the Windows Server version.'
+    Assert-That ($ahubRule -match 'MicrosoftWindowsServer' -and $ahubRule -match '"WindowsServer"' -and $ahubRule -match 'licenseType' -and $ahubRule -match 'Windows_Server') 'The Audit-AzureHybridBenefit rule must still test publisher, offer and license type.'
+    Assert-That ($ahub.Definition.properties.metadata.alzAdjustment -eq 'no-windows-server-version-list') 'Audit-AzureHybridBenefit must record its adjustment.'
+}
+
+# The rule-editing function on synthetic rules.
+function Get-SyntheticRule {
+    param($Conditions)
+    [ordered]@{ policyRule = [ordered]@{ 'if' = [ordered]@{ allOf = @($Conditions) }; 'then' = [ordered]@{ effect = "[parameters('effect')]" } }; metadata = [ordered]@{} }
+}
+function Get-SkuCondition { param([string]$Pattern, [string]$Field = 'Microsoft.Compute/imageSKU') [ordered]@{ field = $Field; like = $Pattern } }
+$typeCondition = [ordered]@{ field = 'type'; equals = 'Microsoft.Compute/virtualMachines' }
+$licenseCondition = [ordered]@{ field = 'Microsoft.Compute/licenseType'; notEquals = 'Windows_Server' }
+
+$properties = Get-SyntheticRule @($typeCondition, [ordered]@{ anyOf = @((Get-SkuCondition '2016-*'), (Get-SkuCondition '2025-*' 'microsoft.compute/imagesku')) }, $licenseCondition)
+Assert-That (Remove-AlzImageSkuCondition -Properties $properties) 'A version list in an anyOf group should be removed, whatever the case of the field name.'
+Assert-That ((Get-AlzCanonicalJson $properties.policyRule['if'].allOf) -eq (Get-AlzCanonicalJson @($typeCondition, $licenseCondition))) 'Only the version list may be removed.'
+Assert-That (-not (Remove-AlzImageSkuCondition -Properties $properties)) 'Removing again must change nothing.'
+$properties = Get-SyntheticRule @($typeCondition, (Get-SkuCondition '2019-*'), $licenseCondition)
+Assert-That ((Remove-AlzImageSkuCondition -Properties $properties) -and @($properties.policyRule['if'].allOf).Count -eq 2) 'A single imageSKU condition should be removed.'
+$properties = Get-SyntheticRule @($typeCondition, [ordered]@{ allOf = @([ordered]@{ anyOf = @((Get-SkuCondition '2012-*')) }) }, $licenseCondition)
+Assert-That ((Remove-AlzImageSkuCondition -Properties $properties) -and @($properties.policyRule['if'].allOf).Count -eq 2) 'A nested group of imageSKU conditions should be removed.'
+$properties = Get-SyntheticRule @($typeCondition, [ordered]@{ anyOf = @((Get-SkuCondition '2016-*'), [ordered]@{ field = 'Microsoft.Compute/imageOffer'; equals = 'WindowsServer' }) }, $licenseCondition)
+Assert-That ((-not (Remove-AlzImageSkuCondition -Properties $properties)) -and @($properties.policyRule['if'].allOf).Count -eq 3) 'A group that also tests another field must stay.'
+$properties = Get-SyntheticRule @($typeCondition, $licenseCondition)
+Assert-That (-not (Remove-AlzImageSkuCondition -Properties $properties)) 'A rule without imageSKU conditions has nothing to remove.'
+$threw = $false
+try { $null = Remove-AlzImageSkuCondition -Properties (Get-SyntheticRule @((Get-SkuCondition '2016-*'))) } catch { $threw = $true }
+Assert-That $threw 'Removing every condition of the policy rule must be refused.'
+
+$adjustment = Get-AlzPolicyRuleAdjustment -Name 'Audit-AzureHybridBenefit'
+Assert-That ($null -ne $adjustment) 'AlzPolicy.Common.ps1 must define the adjustment of Audit-AzureHybridBenefit.'
+if ($null -ne $adjustment) {
+    $properties = Get-SyntheticRule @($typeCondition, (Get-SkuCondition '2016-*'), $licenseCondition)
+    Assert-That (Invoke-AlzPolicyRuleAdjustment -Adjustment $adjustment -Properties $properties) 'The adjustment should change an upstream-shaped rule.'
+    Assert-That ($properties.metadata.alzAdjustment -eq $adjustment.Id) 'The adjustment must be recorded in the metadata.'
+    Assert-That (-not (Invoke-AlzPolicyRuleAdjustment -Adjustment $adjustment -Properties $properties)) 'The adjustment must be idempotent.'
+}
+Assert-That ($null -eq (Get-AlzPolicyRuleAdjustment -Name 'Deny-Storage-CopyScope')) 'A policy without an adjustment must not get one.'
+
+# ---- 1e. Local definitions ----------------------------------------------------------------------------------------------
+Write-Section 'Local definitions'
+Assert-That ($localRecords.Count -ge 1) 'local-definitions/ should hold at least Audit-RHEL-Hybrid-Benefit.'
+foreach ($record in $localRecords) {
+    $problems = @(Test-AlzLocalDefinition -Record $record)
+    Assert-That ($problems.Count -eq 0) "Local definition problems: $($problems -join ' | ')"
+    Assert-That (-not $source.conversion.upstreamFingerprints.Contains($record.Name)) "$($record.Name) is also an upstream definition; the import would refuse to run."
+}
+Assert-That (@(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'definitions') -Filter '*.json' -File -Recurse | Where-Object { $_.BaseName -notin $source.conversion.upstreamFingerprints.Keys }).Count -eq 0) 'definitions/ holds files that are not imported ALZ definitions; the import would delete them. Move them to local-definitions/.'
+
+$rhel = $localRecords | Where-Object Name -eq 'Audit-RHEL-Hybrid-Benefit' | Select-Object -First 1
+Assert-That ($null -ne $rhel) 'Audit-RHEL-Hybrid-Benefit is missing from local-definitions/.'
+if ($null -ne $rhel) {
+    $rhelProperties = $rhel.Definition.properties
+    $rhelConditions = @($rhelProperties.policyRule['if'].allOf)
+    $skuConditions = @($rhelConditions | Where-Object { Test-AlzImageSkuCondition $_ })
+    Assert-That ($skuConditions.Count -eq 1) 'The RHEL policy must have exactly one imageSKU condition.'
+    if ($skuConditions.Count -eq 1) {
+        Assert-That ($skuConditions[0].Contains('like') -and $skuConditions[0].like -eq "[parameters('imageSkuPattern')]" -and -not $skuConditions[0].Contains('in')) 'The RHEL image SKU must be matched with the imageSkuPattern parameter, not with a list of SKUs.'
+    }
+    $pattern = $rhelProperties.parameters['imageSkuPattern']
+    Assert-That ($pattern.type -eq 'String' -and $pattern.defaultValue -eq 'rhel-*') 'imageSkuPattern must be a String that defaults to rhel-*.'
+    # Every SKU that Azure published under redhat:rhel-byos when this was written, and the oldest of the former list,
+    # must match the default; other publishers' SKUs must not.
+    foreach ($sku in 'rhel-lvm74', 'rhel-lvm8', 'rhel-lvm85-gen2', 'rhel-lvm86', 'rhel-lvm95', 'rhel-lvm98-gen2', 'rhel-lvm-92-gen2', 'rhel-raw76') {
+        Assert-That ($sku -like $pattern.defaultValue) "The default image SKU pattern must match $sku."
+    }
+    Assert-That ('2019-datacenter' -notlike $pattern.defaultValue) 'The default image SKU pattern must not match Windows Server SKUs.'
+    $rhelRule = Get-AlzCanonicalJson $rhelProperties.policyRule['if']
+    Assert-That ($rhelRule -match '"redhat"' -and $rhelRule -match '"rhel-byos"' -and $rhelRule -match 'RHEL_BYOS' -and $rhelRule -match 'virtualMachines') 'The RHEL policy must still test type, publisher, offer and license type.'
+    $rhelEffect = $rhelProperties.parameters['effect']
+    Assert-That ($rhelEffect.defaultValue -eq 'Audit' -and (Get-SortedList $rhelEffect.allowedValues) -eq (Get-SortedList @('Audit', 'Deny', 'Disabled'))) 'The RHEL policy must default to Audit and offer Audit, Deny and Disabled.'
+}
+
+# ---- 1c. The conversion itself -----------------------------------------------------------------------------------------
+# The stored files are already converted, so these cases run the conversion on upstream-shaped definitions. They catch
+# a wrong effect mapping before the next import would write it into definitions/.
+Write-Section 'Conversion of upstream-shaped definitions'
+function Get-SyntheticDefinition {
+    param([string]$Name, [string]$Effect, $Allowed, $Default, $Details)
+    $properties = [ordered]@{
+        displayName = $Name
+        policyType  = 'Custom'
+        mode        = 'All'
+        description = 'Synthetic definition for the conversion tests.'
+        metadata    = [ordered]@{ category = 'Test'; version = '1.0.0' }
+        parameters  = [ordered]@{}
+        policyRule  = [ordered]@{ 'if' = [ordered]@{ field = 'type'; equals = 'Microsoft.Test/things' }; 'then' = [ordered]@{ effect = $Effect } }
+    }
+    if ($Allowed) { $properties.parameters['effect'] = [ordered]@{ type = 'String'; allowedValues = @($Allowed); defaultValue = $Default; metadata = [ordered]@{ displayName = 'Effect' } } }
+    if ($Details) { $properties.policyRule['then']['details'] = $Details }
+    [ordered]@{ name = $Name; type = 'Microsoft.Authorization/policyDefinitions'; properties = $properties }
+}
+
+$conversionCases = @(
+    @{ Case = 'Deny'; Allowed = 'Audit', 'Deny', 'Disabled'; Default = 'Deny'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Deny', 'Disabled' }
+    @{ Case = 'Deny without an Audit value'; Allowed = 'Deny', 'Disabled'; Default = 'Deny'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Deny', 'Disabled' }
+    @{ Case = 'DeployIfNotExists'; Allowed = 'DeployIfNotExists', 'Disabled'; Default = 'DeployIfNotExists'; Expect = 'AuditIfNotExists'; ExpectAllowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+    @{ Case = 'DeployIfNotExists with AuditIfNotExists'; Allowed = 'DeployIfNotExists', 'AuditIfNotExists', 'Disabled'; Default = 'DeployIfNotExists'; Expect = 'AuditIfNotExists'; ExpectAllowed = 'DeployIfNotExists', 'AuditIfNotExists', 'Disabled' }
+    @{ Case = 'Modify'; Allowed = 'Modify', 'Disabled'; Default = 'Modify'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Modify', 'Disabled' }
+    @{ Case = 'Append parameter'; Allowed = 'Append', 'Disabled'; Default = 'Append'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Append', 'Disabled' }
+    @{ Case = 'DenyAction parameter'; Allowed = 'DenyAction', 'Disabled'; Default = 'DenyAction'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'DenyAction', 'Disabled'; Details = @{ actionNames = @('delete') } }
+    @{ Case = 'Audit only'; Allowed = 'Audit', 'Disabled'; Default = 'Audit'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Disabled' }
+    @{ Case = 'hard-coded append'; Effect = 'append'; Upstream = 'Append'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'Append', 'Disabled' }
+    @{ Case = 'hard-coded denyAction'; Effect = 'denyAction'; Upstream = 'DenyAction'; Expect = 'Audit'; ExpectAllowed = 'Audit', 'DenyAction', 'Disabled'; Details = @{ actionNames = @('delete') } }
+    @{ Case = 'hard-coded deployIfNotExists'; Effect = 'deployIfNotExists'; Upstream = 'DeployIfNotExists'; Expect = 'AuditIfNotExists'; ExpectAllowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
+)
+foreach ($case in $conversionCases) {
+    $effectExpression = if ($case.Contains('Effect')) { $case.Effect } else { "[parameters('effect')]" }
+    $allowedEffects = if ($case.Contains('Allowed')) { $case.Allowed } else { $null }
+    $defaultEffect = if ($case.Contains('Default')) { $case.Default } else { $null }
+    $details = if ($case.Contains('Details')) { $case.Details } else { $null }
+    $upstreamEffect = if ($case.Contains('Upstream')) { $case.Upstream } else { $case.Default }
+    $definition = Get-SyntheticDefinition -Name "Test-$($case.Case -replace '\W', '-')" -Effect $effectExpression -Allowed $allowedEffects -Default $defaultEffect -Details $details
+    $result = ConvertTo-AlzAuditFirstDefinition -Definition $definition
+    $schema = $result.Properties.parameters['effect']
+    Assert-That ($schema.defaultValue -eq $case.Expect -and $schema.defaultValue -in $auditSet) "Conversion '$($case.Case)': the default should be $($case.Expect), not $($schema.defaultValue)."
+    Assert-That ((Get-SortedList $schema.allowedValues) -eq (Get-SortedList $case.ExpectAllowed)) "Conversion '$($case.Case)': the allowed effects should be $($case.ExpectAllowed -join ', ')."
+    Assert-That ($result.Properties.policyRule.then.effect -eq "[parameters('effect')]") "Conversion '$($case.Case)': the effect must be the parameter."
+    Assert-That ($result.Properties.metadata.alzUpstreamEffect -eq $upstreamEffect) "Conversion '$($case.Case)': the upstream effect should be recorded as $upstreamEffect."
+
+    $converted = [ordered]@{ name = $definition.name; type = $definition.type; properties = $result.Properties }
+    $again = ConvertTo-AlzAuditFirstDefinition -Definition $converted
+    Assert-That ((Get-AlzCanonicalJson $again.Properties) -eq (Get-AlzCanonicalJson $result.Properties)) "Conversion '$($case.Case)' is not idempotent."
+    Assert-That ((Get-AlzDefinitionFingerprint -Definition $definition) -eq (Get-AlzDefinitionFingerprint -Definition $converted)) "Conversion '$($case.Case)' changed more than the effect handling."
+}
+
+$refused = @(
+    @{ Case = 'a hard-coded AuditAction'; Effect = 'AuditAction' }
+    @{ Case = 'an unknown effect value'; Effect = "[parameters('effect')]"; Allowed = 'Deny', 'Bogus', 'Disabled'; Default = 'Deny' }
+)
+foreach ($case in $refused) {
+    $allowedEffects = if ($case.Contains('Allowed')) { $case.Allowed } else { $null }
+    $defaultEffect = if ($case.Contains('Default')) { $case.Default } else { $null }
+    $definition = Get-SyntheticDefinition -Name 'Test-Refused' -Effect $case.Effect -Allowed $allowedEffects -Default $defaultEffect
+    $threw = $false
+    try { $null = ConvertTo-AlzAuditFirstDefinition -Definition $definition } catch { $threw = $true }
+    Assert-That $threw "The conversion must refuse $($case.Case)."
+}
 
 # ---- 2. Generated initiative -------------------------------------------------------------------------------------------
 Write-Section 'Generated initiative (active policies)'
@@ -74,13 +288,18 @@ $expectations = @(
     @{ Name = 'Deploy-Vm-autoShutdown'; Default = 'AuditIfNotExists'; Allowed = 'AuditIfNotExists', 'DeployIfNotExists', 'Disabled' }
     @{ Name = 'Modify-NSG'; Default = 'Audit'; Allowed = 'Audit', 'Modify', 'Disabled' }
     @{ Name = 'Append-KV-SoftDelete'; Default = 'Audit'; Allowed = 'Audit', 'Append', 'Disabled' }
-    @{ Name = 'DenyAction-DiagnosticLogs'; Default = 'AuditAction'; Allowed = 'AuditAction', 'DenyAction', 'Disabled' }
+    @{ Name = 'DenyAction-DiagnosticLogs'; Default = 'Audit'; Allowed = 'Audit', 'DenyAction', 'Disabled' }
     @{ Name = 'Deploy-Budget'; Default = 'AuditIfNotExists'; Allowed = 'DeployIfNotExists', 'AuditIfNotExists', 'Disabled' }
 )
 foreach ($expectation in $expectations) {
     $schema = $parameters["$(ConvertTo-AlzKey $expectation.Name)_effect"]
     Assert-That ($null -ne $schema -and $schema.defaultValue -eq $expectation.Default) "$($expectation.Name) should default to $($expectation.Default)."
-    Assert-That ($null -ne $schema -and (@($schema.allowedValues) | Sort-Object) -join ',' -eq (@($expectation.Allowed) | Sort-Object) -join ',') "$($expectation.Name) should allow $($expectation.Allowed -join ', ')."
+    Assert-That ($null -ne $schema -and (Get-SortedList $schema.allowedValues) -eq (Get-SortedList $expectation.Allowed)) "$($expectation.Name) should allow $($expectation.Allowed -join ', ')."
+}
+foreach ($definition in $active.Definitions) {
+    $definitionDefault = $definition.Properties.parameters[$definition.Adapted.EffectParameter].defaultValue
+    $initiativeDefault = $parameters["$(ConvertTo-AlzKey $definition.PolicyName)_effect"].defaultValue
+    Assert-That ($definitionDefault -eq $initiativeDefault -and $definitionDefault -in $script:AlzAuditEffects) "$($definition.PolicyName): the definition ($definitionDefault) and the initiative ($initiativeDefault) must default to the same audit-mode effect."
 }
 Assert-That ($parameters.Contains('mandatoryTags') -and -not $parameters.Contains('Audit_Tags_Mandatory_mandatoryTags')) 'mandatoryTags should be shared by the two tag policies.'
 Assert-That ($parameters.Contains('Deploy_DDoSProtection_rgName') -and $parameters.Contains('Deploy_FirewallPolicy_rgName') -and -not $parameters.Contains('rgName')) 'rgName must stay per policy.'
@@ -95,6 +314,18 @@ Assert-That ($all.Initiative.Properties.parameters.Count -le 400) 'The full init
 foreach ($entry in $parameters.GetEnumerator()) {
     $other = $all.Initiative.Properties.parameters[$entry.Key]
     Assert-That ($null -ne $other -and (Get-AlzCanonicalJson $other) -eq (Get-AlzCanonicalJson $entry.Value)) "Parameter $($entry.Key) differs once deprecated policies are included, which would break existing assignments."
+}
+
+# Publishing adds the ownership metadata and nothing else to what is stored in definitions/.
+foreach ($definition in $all.Definitions) {
+    $published = Copy-AlzObject $definition.Properties
+    foreach ($key in 'managedBy', 'alzName', 'alzLibraryVersion', 'alzOrigin') { if ($published.metadata.Contains($key)) { $null = $published.metadata.Remove($key) } }
+    Assert-That ((Get-AlzCanonicalJson $published) -eq (Get-AlzCanonicalJson $definition.Record.Definition.properties)) "$($definition.PolicyName): the published definition differs from its file in $(if ($definition.Record.Origin -eq 'local') { 'local-definitions/' } else { 'definitions/' })."
+}
+$localPublished = @($all.Definitions | Where-Object { $_.Record.Origin -eq 'local' })
+Assert-That ($localPublished.Count -eq $localRecords.Count) 'Every local definition must be part of the package.'
+foreach ($definition in $localPublished) {
+    Assert-That ($definition.Properties.metadata.alzOrigin -eq 'local' -and -not $definition.Properties.metadata.Contains('alzLibraryVersion') -and -not $definition.Properties.metadata.Contains('alzUpstreamEffect')) "$($definition.PolicyName): a published local definition is marked alzOrigin=local and has no library version or upstream effect."
 }
 
 # ---- 3b. Definition names ----------------------------------------------------------------------------------------------
@@ -119,13 +350,83 @@ $mutations = [ordered]@{
     'an effect that the definition rejects'   = { param($p) $p.Initiative.Properties.parameters['Deploy_Storage_sslEnforcement_effect'].allowedValues = @('AuditIfNotExists', 'Disabled', 'Bogus') }
     'a dangling parameter binding'            = { param($p) $p.Initiative.Properties.policyDefinitions[0].parameters.effect.value = "[parameters('Nope')]" }
     'a parameter without a default'           = { param($p) $null = $p.Initiative.Properties.parameters['Deny_Storage_CopyScope_effect'].Remove('defaultValue') }
-    'a changed policy condition'              = { param($p) $p.Definitions[0].Properties.policyRule['if'] = @{ field = 'type'; equals = 'x' } }
+    'a definition that defaults to an enforcing effect' = { param($p) $p.Definitions[0].Properties.parameters['effect'].defaultValue = 'Deny' }
+    'a definition that defaults to AuditAction' = { param($p) $p.Definitions[0].Properties.parameters['effect'].defaultValue = 'AuditAction' }
+    'a definition that dropped its upstream effect' = { param($p) $p.Definitions[1].Properties.parameters['effect'].allowedValues = @('AuditIfNotExists', 'Disabled') }
     'a duplicate reference id'                = { param($p) $p.Initiative.Properties.policyDefinitions[1].policyDefinitionReferenceId = $p.Initiative.Properties.policyDefinitions[0].policyDefinitionReferenceId }
 }
 foreach ($mutation in $mutations.GetEnumerator()) {
     $copy = Build-AlzPolicyPackage -Record $sample -Scope $scope -InitiativeName 'x' -DisplayName 'x' -Source $source
     & $mutation.Value $copy
     Assert-That (@(Test-AlzPolicyPackage -Package $copy).Count -gt 0) "The validator did not catch $($mutation.Key)."
+}
+
+# ---- 4b. The stored-definition check must catch mistakes ---------------------------------------------------------------
+Write-Section 'Stored definition negative tests'
+$template = $records | Where-Object Name -eq 'Deny-Storage-CopyScope' | Select-Object -First 1
+$control = [pscustomobject]@{ Name = $template.Name; Definition = (Copy-AlzObject $template.Definition) }
+Assert-That (@(Test-AlzStoredDefinition -Record $control -Source $source).Count -eq 0) 'An unmodified copy of a stored definition must pass the check.'
+$storedMutations = [ordered]@{
+    'a default that enforces'            = { param($d) $d.properties.parameters.effect.defaultValue = 'Deny' }
+    'a default of AuditAction'           = { param($d) $d.properties.parameters.effect.defaultValue = 'AuditAction' }
+    'a hard-coded effect'                = { param($d) $d.properties.policyRule.then.effect = 'deny' }
+    'a changed policy condition'         = { param($d) $d.properties.policyRule['if'] = @{ field = 'type'; equals = 'x' } }
+    'a changed parameter'                = { param($d) $d.properties.parameters.Remove('effect'); $d.properties.parameters['other'] = @{ type = 'String' } }
+    'a changed description'              = { param($d) $d.properties.description = 'changed' }
+    'a lost upstream effect record'      = { param($d) $null = $d.properties.metadata.Remove('alzUpstreamEffect') }
+    'an upstream effect that is gone'    = { param($d) $d.properties.parameters.effect.allowedValues = @('Audit', 'Disabled') }
+    'an unknown policy'                  = { param($d) $d.name = 'Not-In-The-Manifest' }
+}
+foreach ($mutation in $storedMutations.GetEnumerator()) {
+    $copy = [pscustomobject]@{ Name = $template.Name; Definition = (Copy-AlzObject $template.Definition) }
+    & $mutation.Value $copy.Definition
+    if ($mutation.Key -eq 'an unknown policy') { $copy.Name = 'Not-In-The-Manifest' }
+    Assert-That (@(Test-AlzStoredDefinition -Record $copy -Source $source).Count -gt 0) "The stored definition check did not catch $($mutation.Key)."
+}
+# ---- 4c. The adjustment and local-definition checks must catch mistakes -------------------------------------------------
+Write-Section 'Adjustment and local definition negative tests'
+$ahubTemplate = $upstreamRecords | Where-Object Name -eq 'Audit-AzureHybridBenefit' | Select-Object -First 1
+$ahubControl = [pscustomobject]@{ Name = $ahubTemplate.Name; Definition = (Copy-AlzObject $ahubTemplate.Definition) }
+Assert-That (@(Test-AlzStoredDefinition -Record $ahubControl -Source $source).Count -eq 0) 'An unmodified copy of the adjusted definition must pass the check.'
+$adjustmentMutations = [ordered]@{
+    'the version list restored'      = { param($d) $conditions = @($d.properties.policyRule['if'].allOf); $d.properties.policyRule['if']['allOf'] = @($conditions[0..2]) + @([ordered]@{ anyOf = @([ordered]@{ field = 'Microsoft.Compute/imageSKU'; like = '2016-*' }) }) + @($conditions[3]) }
+    'the adjustment record removed'  = { param($d) $null = $d.properties.metadata.Remove('alzAdjustment') }
+    'a wrong adjustment record'      = { param($d) $d.properties.metadata['alzAdjustment'] = 'something-else' }
+    'another rule change'            = { param($d) $d.properties.policyRule['if'].allOf[1]['equals'] = 'SomeoneElse' }
+    'another effect-free change'     = { param($d) $d.properties.description = 'changed' }
+}
+foreach ($mutation in $adjustmentMutations.GetEnumerator()) {
+    $copy = [pscustomobject]@{ Name = $ahubTemplate.Name; Definition = (Copy-AlzObject $ahubTemplate.Definition) }
+    & $mutation.Value $copy.Definition
+    Assert-That (@(Test-AlzStoredDefinition -Record $copy -Source $source).Count -gt 0) "The stored definition check did not catch $($mutation.Key) in an adjusted definition."
+}
+$stray = [pscustomobject]@{ Name = $template.Name; Definition = (Copy-AlzObject $template.Definition) }
+$stray.Definition.properties.metadata['alzAdjustment'] = 'no-windows-server-version-list'
+Assert-That (@(Test-AlzStoredDefinition -Record $stray -Source $source).Count -gt 0) 'An adjustment record on a definition that has no adjustment must be caught.'
+$tampered = Copy-AlzObject $source
+$tampered.conversion.adjustments['Audit-AzureHybridBenefit'].adjustedFingerprint = '0' * 64
+Assert-That (@(Test-AlzStoredDefinition -Record $ahubControl -Source $tampered).Count -gt 0) 'A wrong adjusted fingerprint in the manifest must be caught.'
+$unrecorded = Copy-AlzObject $source
+$null = $unrecorded.conversion.adjustments.Remove('Audit-AzureHybridBenefit')
+Assert-That (@(Test-AlzStoredDefinition -Record $ahubControl -Source $unrecorded).Count -gt 0) 'An adjustment that the manifest does not record must be caught.'
+
+$rhelTemplate = $localRecords | Where-Object Name -eq 'Audit-RHEL-Hybrid-Benefit' | Select-Object -First 1
+$localControl = [pscustomobject]@{ Name = $rhelTemplate.Name; Definition = (Copy-AlzObject $rhelTemplate.Definition) }
+Assert-That (@(Test-AlzLocalDefinition -Record $localControl).Count -eq 0) 'An unmodified copy of a local definition must pass the check.'
+$localMutations = [ordered]@{
+    'a default that enforces'        = { param($d) $d.properties.parameters.effect.defaultValue = 'Deny' }
+    'a hard-coded effect'            = { param($d) $d.properties.policyRule.then.effect = 'audit' }
+    'a default that is not offered'  = { param($d) $d.properties.parameters.effect.allowedValues = @('Deny', 'Disabled') }
+    'an effect parameter without Disabled' = { param($d) $d.properties.parameters.effect.allowedValues = @('Deny', 'Audit') }
+    'AuditAction'                    = { param($d) $d.properties.parameters.effect.allowedValues = @('AuditAction', 'Audit', 'Disabled') }
+    'a missing policyType'           = { param($d) $null = $d.properties.Remove('policyType') }
+    'the wrong resource type'        = { param($d) $d.type = 'Microsoft.Authorization/policySetDefinitions' }
+    'a metadata key of the package'  = { param($d) $d.properties.metadata['managedBy'] = 'someone' }
+}
+foreach ($mutation in $localMutations.GetEnumerator()) {
+    $copy = [pscustomobject]@{ Name = $rhelTemplate.Name; Definition = (Copy-AlzObject $rhelTemplate.Definition) }
+    & $mutation.Value $copy.Definition
+    Assert-That (@(Test-AlzLocalDefinition -Record $copy).Count -gt 0) "The local definition check did not catch $($mutation.Key)."
 }
 
 # ---- 5. Catalog ---------------------------------------------------------------------------------------------------------
@@ -174,6 +475,10 @@ $null = New-Module -Name AlzMockArm -ArgumentList $tenantId, $subscriptionId -Sc
         if ($Properties.policyRule.then.effect -notmatch "^\[parameters\('(?<name>[^']+)'\)\]$") { return $null }
         $schema = $Properties.parameters[$Matches.name]
         if ($null -eq $schema) { return "The effect parameter '$($Matches.name)' is not defined." }
+        $known = 'Audit', 'AuditIfNotExists', 'Deny', 'DenyAction', 'DeployIfNotExists', 'Modify', 'Append', 'Disabled'
+        foreach ($value in @($schema.allowedValues) + @($schema.defaultValue)) {
+            if ($null -ne $value -and $value -notin $known) { return "'$value' is not a policy effect." }
+        }
         if ($schema.Contains('allowedValues') -and $schema.Contains('defaultValue') -and @($schema.allowedValues) -notcontains $schema.defaultValue) { return 'The default effect is not an allowed value.' }
     }
 
@@ -302,6 +607,15 @@ Assert-That ($arm.Store.ContainsKey($initiativeKey)) 'The initiative was not sto
 Assert-That ($arm.Store[$initiativeKey].properties.policyDefinitions.Count -eq $activeRecords.Count) 'The stored initiative has the wrong number of policies.'
 Assert-That (@($arm.Store.Keys | Where-Object { $_ -like '*/policydefinitions/alz-*' }).Count -eq $activeRecords.Count) 'Definitions were not stored with the prefix.'
 
+# What Azure ends up storing audits by default: the definitions (assigned on their own) and the initiative.
+$storedDefinitions = @($arm.Store.Values | Where-Object { $_.type -eq 'Microsoft.Authorization/policyDefinitions' })
+$enforcingStored = @($storedDefinitions | Where-Object {
+        $effectName = [regex]::Match([string]$_.properties.policyRule.then.effect, "^\[parameters\('(?<n>[^']+)'\)\]$").Groups['n'].Value
+        $effectName -eq '' -or $_.properties.parameters[$effectName].defaultValue -notin $script:AlzAuditEffects
+    })
+Assert-That ($storedDefinitions.Count -eq $activeRecords.Count -and $enforcingStored.Count -eq 0) "Every published definition must default to an audit-mode effect; $($enforcingStored.Count) do not."
+$enforcingInitiative = @($arm.Store[$initiativeKey].properties.parameters.GetEnumerator() | Where-Object { $_.Key.EndsWith('_effect') -and $_.Value.defaultValue -notin $script:AlzAuditEffects })
+Assert-That ($enforcingInitiative.Count -eq 0) 'Every effect parameter of the published initiative must default to an audit-mode effect.'
 # re-running updates in place (the list is paged, so existing resources must still be recognised)
 $arm.Calls.Clear()
 $run = Invoke-Deploy @{ ManagementGroupId = 'contoso' }

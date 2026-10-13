@@ -7,6 +7,7 @@
       "alzCloudEnvironments": [
         "AzureCloud"
       ],
+      "alzUpstreamEffect": "Audit",
       "category": "Kubernetes",
       "source": "https://github.com/Azure/Enterprise-Scale/",
       "version": "1.0.0"
