@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/Azure/Azure-Landing-Zones-Library",
+  "path": "platform/alz/policy_definitions",
+  "ref": "platform/alz/2026.10.0",
+  "version": "2026.10.0",
+  "commit": "4eae565287844360a61545f9799400431adb6d0a",
+  "importedOn": "2026-10-13",
+  "license": "MIT",
+  "definitions": {
+    "total": 149,
+    "active": 93,
+    "deprecated": 56
+  }
+}
