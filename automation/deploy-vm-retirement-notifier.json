@@ -236,8 +236,8 @@
               "inputs": {
                 "from": "@body('Retirement_rows')",
                 "select": {
-                  "series": "@replace(replace(replace(replace(replace(trim(split(trim(item()), '|')[1]), '\\_', '_'), '*', ''), '`', ''), '''', ''), '\\', '')",
-                  "date": "@concat(if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), 2), concat('20', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), '-', if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), 1), concat('0', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), '-', if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]), 1), concat('0', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]))",
+                  "label": "@replace(replace(replace(replace(replace(trim(split(trim(item()), '|')[1]), '\\_', '_'), '*', ''), '`', ''), '''', ''), '\\', '')",
+                  "retires": "@concat(if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), 2), concat('20', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[2]), '-', if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), 1), concat('0', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[0]), '-', if(equals(length(split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]), 1), concat('0', split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]), split(replace(trim(split(trim(item()), '|')[4]), '*', ''), '/')[1]))",
                   "guide": "@replace(replace(if(startsWith(trim(first(split(last(split(split(trim(item()), '|')[5], '](')), ')'))), 'http'), trim(first(split(last(split(split(trim(item()), '|')[5], '](')), ')'))), if(startsWith(trim(first(split(last(split(split(trim(item()), '|')[5], '](')), ')'))), '/'), concat('https://learn.microsoft.com', replace(trim(first(split(last(split(split(trim(item()), '|')[5], '](')), ')'))), '/sizes/retirement/', '/sizes/lifecycle/retirement/')), concat('https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/', replace(trim(first(split(last(split(split(trim(item()), '|')[5], '](')), ')'))), '../', '')))), '''', ''), '\\', '')"
                 }
               }
@@ -249,7 +249,7 @@
                   "Succeeded"
                 ]
               },
-              "inputs": "// Live retirement catalog parsed from https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\nresources\n| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend Sku = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name))\n| where isnotempty(Sku)\n| extend skuClean = tolower(extract('^(.*?)(_promo)?$', 1, Sku))\n| extend skuVer = iff(skuClean matches regex '_v[0-9]+$', extract('_v([0-9]+)$', 1, skuClean), '1'),\n         skuStem = iff(skuClean matches regex '_v[0-9]+$', extract('^(.*)_v[0-9]+$', 1, skuClean), skuClean)\n| extend skuBody = extract('^(?:standard|basic)_([a-z0-9_-]+)$', 1, skuStem)\n| where isnotempty(skuBody)\n| extend catalogRaw = '@{replace(string(body('Retirement_catalog')), '''', '')}'\n| extend catalog = parse_json(catalogRaw)\n| mv-expand entry = catalog limit 400\n| extend seriesLabel = tostring(entry.series), retireDateStr = tostring(entry.date), guideUrl = tostring(entry.guide)\n| extend cleanedLabel = extract('^(.*?)([ ]*[(][vV]1[)])?$', 1, seriesLabel)\n| extend cleanedLabel = extract('^(.*?)([ ]*-?[sS]eries)?$', 1, cleanedLabel)\n| mv-expand rawPart = split(cleanedLabel, '/') limit 20\n| extend part = extract('^[ ]*(.*?)[ ]*$', 1, tostring(rawPart))\n| extend qualExact = iff(part matches regex '^[A-Za-z]+v[0-9]+-[A-Za-z]+[0-9]+[A-Za-z0-9]*$', tolower(strcat('standard_', extract('^[A-Za-z]+v([0-9]+)-([A-Za-z]+[0-9]+[A-Za-z0-9]*)$', 2, part), '_v', extract('^[A-Za-z]+v([0-9]+)-([A-Za-z]+[0-9]+[A-Za-z0-9]*)$', 1, part))), '')\n| extend exactSku = iff(part matches regex '^(?i)(standard|basic)_', tolower(part), qualExact)\n| extend partVer = iff(isempty(exactSku) and part matches regex '_?v[0-9]+$', extract('_?v([0-9]+)$', 1, part), '1'),\n         partStem = iff(isempty(exactSku) and part matches regex '_?v[0-9]+$', extract('^(.*?)_?v[0-9]+$', 1, part), part)\n| extend ruleFam = tolower(extract('^([A-Z]+)', 1, partStem)),\n         ruleFeat = tolower(extract('^[A-Z]+([A-Za-z0-9_]*)$', 1, partStem))\n| extend ruleFeatNorm = strcat(extract('^([^_]*)', 1, ruleFeat), extract('^[^_]*_([^_]*)', 1, ruleFeat), extract('^[^_]*_[^_]*_([^_]*)', 1, ruleFeat))\n| extend skuRem = iff(isempty(exactSku) and isnotempty(ruleFam) and skuBody startswith ruleFam, substring(skuBody, strlen(ruleFam)), '')\n| extend skuPreFeat = extract('^([a-z]*)[0-9]+', 1, skuRem),\n         skuPostFeat = extract('^[a-z]*[0-9]+(?:-[0-9]+)?([a-z0-9]*)', 1, skuRem),\n         skuQual = extract('^[a-z]*[0-9]+(?:-[0-9]+)?[a-z0-9]*_([a-z0-9_]+)$', 1, skuRem)\n| extend skuQualNorm = strcat(extract('^([^_]*)', 1, skuQual), extract('^[^_]*_([^_]*)', 1, skuQual))\n| extend skuFeatNorm = strcat(skuPreFeat, skuPostFeat, skuQualNorm)\n| extend hasExactOverride = tolower(catalogRaw) contains strcat('\"', skuClean, '\"') or tolower(catalogRaw) contains strcat('v', skuVer, '-', skuBody, ' ')\n| where iff(\n    isnotempty(exactSku),\n    skuClean == exactSku,\n    not(hasExactOverride)\n    and skuVer == partVer\n    and isnotempty(skuRem)\n    and skuRem matches regex '^[a-z]*[0-9]+(?:-[0-9]+)?[a-z0-9]*(?:_[a-z0-9_]+)?$'\n    and skuPreFeat in ('', 's')\n    and iff(\n        isnotempty(ruleFeatNorm),\n        skuFeatNorm == ruleFeatNorm or (ruleFeatNorm == 's' and isempty(skuQualNorm) and isempty(skuPreFeat) and skuPostFeat == 'is'),\n        isempty(skuQualNorm) and isempty(skuPreFeat) and (strlen(ruleFam) == 2 or seriesLabel contains '(V1)' or skuPostFeat in ('', 'i', 'r', 'mr'))\n    )\n)\n| extend RetireOn = todatetime(retireDateStr)\n| where isnotnull(RetireOn) and RetireOn <= datetime_add('month', @{parameters('retirementHorizonMonths')}, startofday(now()))\n| extend Days = datetime_diff('day', RetireOn, startofday(now()))\n| join kind=leftouter (resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId, SubscriptionName = name) on subscriptionId\n| project\n    Status = iff(Days <= 0, 'Retired', strcat('Retires in ', Days, iff(Days == 1, ' day', ' days'))),\n    RetirementDate = substring(tostring(RetireOn), 0, 10),\n    SubscriptionId = subscriptionId,\n    SubscriptionName,\n    ResourceGroup = resourceGroup,\n    ResourceName = name,\n    Type = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', strcat('VMSS (', tostring(toint(sku.capacity)), ')')),\n    Sku,\n    PublishedSeries = seriesLabel,\n    MigrationGuide = guideUrl,\n    Region = location,\n    Days\n| order by Days asc, SubscriptionName asc, ResourceGroup asc, ResourceName asc\n| project-away Days"
+              "inputs": "// Retirement catalog fetched live from https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\nresources\n| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend Sku = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name))\n| where isnotempty(Sku)\n| project id, subscriptionId, resourceGroup, name, type, location, Sku, Capacity = toint(sku.capacity)\n| extend skuName = tolower(Sku)\n| extend skuBody = extract('^(?:standard|basic)_(.+?)(?:_promo)?$', 1, skuName)\n| where isnotempty(skuBody)\n| extend skuVer = iff(skuBody matches regex '_v[0-9]+$', extract('_v([0-9]+)$', 1, skuBody), '')\n| extend skuStem = iff(skuBody matches regex '_v[0-9]+$', extract('^(.+)_v[0-9]+$', 1, skuBody), skuBody)\n| extend skuLead = iff(skuStem matches regex '^[a-z]+[0-9]', extract('^([a-z]+)[0-9]', 1, skuStem), '')\n| extend skuTrail = iff(skuStem matches regex '^[a-z]+[0-9]', extract('^[a-z]+[0-9]+(?:-[0-9]+)?([a-z]*)', 1, skuStem), '')\n| extend skuQual = iff(skuStem matches regex '^[a-z]+[0-9]+(-[0-9]+)?[a-z]*_.+$', extract('^[a-z]+[0-9]+(?:-[0-9]+)?[a-z]*_(.+)$', 1, skuStem), '')\n| extend skuKey = strcat(skuLead, skuTrail, iff(skuQual == '', '', strcat('_', skuQual)))\n| project id, subscriptionId, resourceGroup, name, type, location, Sku, Capacity, skuName, skuVer, skuLead, skuQual, skuKey\n| extend catalog = parse_json('@{replace(string(body('Retirement_catalog')), '''', '')}')\n| mv-expand entry = catalog limit 1000\n| extend label = tostring(entry.label), retires = tostring(entry.retires), guide = tostring(entry.guide)\n| extend cleaned = extract('^(.*?)(?:[ -]series)?(?: [(]v1[)])?$', 1, tolower(label))\n| mv-expand part = split(cleaned, '/') limit 20\n| extend partText = tostring(part)\n| extend exactSku = iff(partText matches regex '^(standard|basic)_', partText, iff(partText matches regex '^[a-z]+v[0-9]+-[a-z]+[0-9]+[a-z0-9]*$', strcat('standard_', extract('^[a-z]+v[0-9]+-(.+)$', 1, partText), '_v', extract('^[a-z]+v([0-9]+)-', 1, partText)), ''))\n| extend ruleVer = iff(partText matches regex 'v[0-9]+$', extract('v([0-9]+)$', 1, partText), '')\n| extend ruleStem = iff(partText matches regex 'v[0-9]+$', extract('^(.*?)_?v[0-9]+$', 1, partText), partText)\n| where (exactSku != '' and skuName == exactSku) or (exactSku == '' and ruleVer == skuVer and (ruleStem == skuKey or (ruleStem == skuLead and skuQual == '')))\n| extend Rank = iff(exactSku != '', 3, iff(ruleStem == skuKey, 2, 1))\n| extend RetireOn = todatetime(retires)\n| where RetireOn <= datetime_add('month', @{parameters('retirementHorizonMonths')}, startofday(now()))\n| extend Days = datetime_diff('day', RetireOn, startofday(now()))\n| project id, subscriptionId, resourceGroup, name, type, location, Sku, Capacity, label, guide, Rank, RetireOn, Days\n| join kind=leftouter (resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId, SubscriptionName = name) on subscriptionId\n| project Status = iff(Days <= 0, 'Retired', strcat('Retires in ', Days, iff(Days == 1, ' day', ' days'))), RetirementDate = substring(tostring(RetireOn), 0, 10), SubscriptionId = subscriptionId, SubscriptionName, ResourceGroup = resourceGroup, ResourceName = name, Type = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', strcat('VMSS (', tostring(Capacity), ')')), Sku, PublishedSeries = label, MigrationGuide = guide, Region = location, ResourceId = id, Rank, Days\n| order by Days asc, SubscriptionName asc, ResourceGroup asc, ResourceName asc, Rank desc\n| project-away Days, Rank"
             },
             "Find_risky_VMs": {
               "type": "Http",
@@ -319,7 +319,7 @@
                 "where": "@not(contains(body('Readable_subscriptions'), toLower(item())))"
               }
             },
-            "Risky_resources": {
+            "Risky_rows": {
               "type": "Compose",
               "runAfter": {
                 "Find_risky_VMs": [
@@ -334,7 +334,7 @@
                 "Initialize_sku_specs": [
                   "Succeeded"
                 ],
-                "Risky_resources": [
+                "Risky_rows": [
                   "Succeeded"
                 ],
                 "Unreadable_subscriptions": [
@@ -345,16 +345,64 @@
                 "and": [
                   {
                     "greater": [
-                      "@length(outputs('Risky_resources'))",
+                      "@length(outputs('Risky_rows'))",
                       0
                     ]
                   }
                 ]
               },
               "actions": {
-                "Select_risky_sku_names": {
+                "Risky_indexed": {
                   "type": "Select",
                   "runAfter": {},
+                  "inputs": {
+                    "from": "@range(0, length(outputs('Risky_rows')))",
+                    "select": {
+                      "i": "@item()",
+                      "row": "@outputs('Risky_rows')[item()]"
+                    }
+                  }
+                },
+                "Risky_deduped": {
+                  "type": "Query",
+                  "runAfter": {
+                    "Risky_indexed": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "from": "@body('Risky_indexed')",
+                    "where": "@or(equals(item()['i'], 0), not(equals(toLower(string(outputs('Risky_rows')[max(sub(item()['i'], 1), 0)]['ResourceId'])), toLower(string(item()['row']['ResourceId'])))))"
+                  }
+                },
+                "Risky_deduped_rows": {
+                  "type": "Select",
+                  "runAfter": {
+                    "Risky_deduped": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "from": "@body('Risky_deduped')",
+                    "select": "@item()['row']"
+                  }
+                },
+                "Risky_resources": {
+                  "type": "Compose",
+                  "runAfter": {
+                    "Risky_deduped_rows": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": "@body('Risky_deduped_rows')"
+                },
+                "Select_risky_sku_names": {
+                  "type": "Select",
+                  "runAfter": {
+                    "Risky_resources": [
+                      "Succeeded"
+                    ]
+                  },
                   "inputs": {
                     "from": "@outputs('Risky_resources')",
                     "select": "@toLower(item()?['Sku'])"
@@ -371,7 +419,11 @@
                 },
                 "Select_risky_scopes": {
                   "type": "Select",
-                  "runAfter": {},
+                  "runAfter": {
+                    "Risky_resources": [
+                      "Succeeded"
+                    ]
+                  },
                   "inputs": {
                     "from": "@outputs('Risky_resources')",
                     "select": "@concat(toLower(item()?['SubscriptionId']), '|', toLower(item()?['Region']))"
@@ -462,7 +514,9 @@
                   "type": "Query",
                   "runAfter": {
                     "Fetch_regional_skus": [
-                      "Succeeded"
+                      "Succeeded",
+                      "Failed",
+                      "TimedOut"
                     ]
                   },
                   "inputs": {
@@ -572,7 +626,7 @@
                     "body": {
                       "To": "@{join(parameters('recipients'), ';')}",
                       "Subject": "Azure VM retirement: @{length(outputs('Risky_resources'))} VMs or scale sets need action",
-                      "Body": "<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px\">@{length(outputs('Risky_resources'))} VMs or scale sets use sizes that are retired or retire within @{parameters('retirementHorizonMonths')} months. Resize or migrate them before the retirement date.</p>@{outputs('Email_table')}<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#605e5c\">Scanned @{sub(length(parameters('subscriptionIds')), length(body('Unreadable_subscriptions')))} of @{length(parameters('subscriptionIds'))} subscriptions@{if(greater(int(coalesce(body('Find_risky_VMs')?['totalRecords'], 0)), length(outputs('Risky_resources'))), concat('; showing the first ', string(length(outputs('Risky_resources'))), ' of ', string(body('Find_risky_VMs')?['totalRecords'])), '')}. Retirement dates and guides are fetched live from Microsoft Learn; vCPU and memory specs come from the Azure Compute SKUs API. Check the linked guide for regional extensions and validate disks, images, and quota before resizing. <a href=\"https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Retirement dates and guidance</a></p>",
+                      "Body": "<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px\">@{length(outputs('Risky_resources'))} VMs or scale sets use sizes that are retired or retire within @{parameters('retirementHorizonMonths')} months. Resize or migrate them before the retirement date.</p>@{outputs('Email_table')}<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#605e5c\">Scanned @{sub(length(parameters('subscriptionIds')), length(body('Unreadable_subscriptions')))} of @{length(parameters('subscriptionIds'))} subscriptions@{if(greater(int(coalesce(body('Find_risky_VMs')?['totalRecords'], 0)), length(outputs('Risky_rows'))), concat('; the query result was truncated to the first ', string(length(outputs('Risky_rows'))), ' of ', string(body('Find_risky_VMs')?['totalRecords']), ' matches'), '')}. Retirement dates and guides are fetched live from Microsoft Learn; vCPU and memory specs come from the Azure Compute SKUs API. Check the linked guide for regional extensions and validate disks, images, and quota before resizing. <a href=\"https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Retirement dates and guidance</a></p>",
                       "Importance": "High"
                     }
                   }
