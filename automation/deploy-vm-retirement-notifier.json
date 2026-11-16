@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.0.0.0",
+  "contentVersion": "2.0.0.0",
   "parameters": {
     "recipients": {
       "type": "array",
       "minLength": 1,
       "metadata": {
-        "description": "Email addresses that receive the report, as a JSON array. Example: [\"ops@contoso.com\",\"team@contoso.com\"]"
+        "description": "Email addresses that receive the report, as a JSON array."
       }
     },
     "subscriptionIds": {
@@ -14,7 +14,7 @@
       "defaultValue": "[createArray(subscription().subscriptionId)]",
       "minLength": 1,
       "metadata": {
-        "description": "Subscription IDs to check, as a JSON array. Defaults to the deployment subscription. Grant the Logic App identity Reader on each one."
+        "description": "Subscriptions to check. Grant the lookup Function identity Reader on each one."
       }
     },
     "retirementHorizonMonths": {
@@ -30,25 +30,19 @@
       "type": "string",
       "defaultValue": "vm-retirement-notifier",
       "minLength": 1,
-      "maxLength": 80,
-      "metadata": {
-        "description": "Name of the Logic App (Consumption)."
-      }
+      "maxLength": 80
     },
     "office365ConnectionName": {
       "type": "string",
       "defaultValue": "office365-vm-retirement-notifier",
       "minLength": 1,
-      "maxLength": 80,
-      "metadata": {
-        "description": "Name of the Office 365 Outlook connection. Authorize it after deployment."
-      }
+      "maxLength": 80
     },
     "location": {
       "type": "string",
       "defaultValue": "[resourceGroup().location]",
       "metadata": {
-        "description": "Region for the Logic App and the connection."
+        "description": "Region supporting Logic Apps and Windows Consumption Azure Functions."
       }
     },
     "workflowState": {
@@ -59,22 +53,137 @@
         "Enabled"
       ],
       "metadata": {
-        "description": "Keep Disabled until the Office 365 connection is authorized."
+        "description": "Keep Disabled until the Office 365 connection and Reader access are configured."
       }
     },
     "assignReaderRole": {
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "Grant the Logic App identity Reader on the deployment subscription. Requires Owner or User Access Administrator."
+        "description": "Grant the lookup Function identity Reader on the deployment subscription. Requires Owner or User Access Administrator."
       }
     }
   },
   "variables": {
     "normalizedLocation": "[toLower(replace(parameters('location'), ' ', ''))]",
-    "office365ApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('normalizedLocation'), 'office365')]"
+    "office365ApiId": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', variables('normalizedLocation'), 'office365')]",
+    "lookupAppName": "[concat('vmretire-', uniqueString(resourceGroup().id, parameters('workflowName')))]",
+    "storageName": "[concat('vmretire', uniqueString(resourceGroup().id, parameters('workflowName')))]",
+    "planName": "[concat(variables('lookupAppName'), '-plan')]",
+    "readerDeploymentName": "[format('{0}-reader-{1}', take(parameters('workflowName'), 40), uniqueString(resourceGroup().id))]"
   },
   "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageName')]",
+      "location": "[variables('normalizedLocation')]",
+      "kind": "StorageV2",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "properties": {
+        "supportsHttpsTrafficOnly": true,
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('planName')]",
+      "location": "[variables('normalizedLocation')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic"
+      },
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('lookupAppName')]",
+      "location": "[variables('normalizedLocation')]",
+      "kind": "functionapp",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "httpsOnly": true,
+        "siteConfig": {
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "appSettings": [
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, ';EndpointSuffix=', environment().suffixes.storage)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageName')), '2023-05-01').keys[0].value, ';EndpointSuffix=', environment().suffixes.storage)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[variables('lookupAppName')]"
+            },
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~4"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "node"
+            },
+            {
+              "name": "WEBSITE_NODE_DEFAULT_VERSION",
+              "value": "~24"
+            },
+            {
+              "name": "AzureFunctionsJobHost__functionTimeout",
+              "value": "00:02:00"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/functions",
+      "apiVersion": "2022-03-01",
+      "name": "[concat(variables('lookupAppName'), '/retirements')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('lookupAppName'))]"
+      ],
+      "properties": {
+        "language": "JavaScript",
+        "config": {
+          "scriptFile": "index.js",
+          "bindings": [
+            {
+              "authLevel": "function",
+              "type": "httpTrigger",
+              "direction": "in",
+              "name": "req",
+              "methods": [
+                "post"
+              ]
+            },
+            {
+              "type": "http",
+              "direction": "out",
+              "name": "res"
+            }
+          ]
+        },
+        "files": {
+          "index.js": "'use strict';\n\nconst LEARN_ROOT = 'https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/';\nconst CATALOG_URL = `${LEARN_ROOT}retirements-and-capacity-restrictions`;\nconst ARM_ROOT = 'https://management.azure.com';\nconst DAY = 86400000;\nconst INVENTORY_QUERY = `resources\n| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend Sku = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name))\n| join kind=leftouter (resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId, SubscriptionName = name) on subscriptionId\n| project id, SubscriptionId = subscriptionId, SubscriptionName, ResourceGroup = resourceGroup, ResourceName = name, Type = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', strcat('VMSS (', tostring(sku.capacity), ')')), Sku, Region = location`;\n\nfunction plain(value) {\n    return value.replace(/\\\\_/g, '_').replace(/\\[([^\\]]+)\\]\\([^)]+\\)/g, '$1')\n        .replace(/<[^>]+>/g, ' ').replace(/[*`]/g, '').trim();\n}\n\nfunction dateOnly(value) {\n    const m = plain(value).match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{2}|\\d{4})$/);\n    if (!m) throw new Error(`Unrecognized retirement date: ${value}`);\n    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);\n    const iso = `${year}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;\n    if (!Number.isFinite(Date.parse(iso)) || new Date(iso).toISOString().slice(0, 10) !== iso) {\n        throw new Error(`Invalid retirement date: ${value}`);\n    }\n    return iso;\n}\n\nfunction seriesRules(label) {\n    const name = plain(label);\n    if (/^(Standard|Basic)_/i.test(name)) {\n        return [{ exact: name.toLowerCase(), specificity: 100 }];\n    }\n    const cleaned = name.replace(/\\s*\\(V1\\)/gi, '').replace(/-?series\\b/gi, '').trim();\n    const qualified = cleaned.match(/v(\\d+)-([A-Z]+\\d+[a-z]+)$/);\n    if (qualified) {\n        return [{ exact: `standard_${qualified[2]}_v${qualified[1]}`.toLowerCase(), specificity: 100 }];\n    }\n    return cleaned.split(/[\\/,]/).map(part => {\n        const version = part.trim().match(/_?v(\\d+)$/);\n        const stem = version ? part.trim().slice(0, version.index) : part.trim();\n        const m = stem.match(/^([A-Z]+)([a-z][A-Za-z0-9_]*|_[A-Za-z0-9_]+)?$/);\n        if (!m) throw new Error(`Unsupported published series label: ${label}`);\n        const features = (m[2] || '').replace(/_/g, '').toLowerCase();\n        return {\n            family: m[1].toLowerCase(), features, version: Number(version?.[1] || 1),\n            specificity: 1 + features.length\n        };\n    });\n}\n\nfunction matchesSku(rule, sku) {\n    if (rule.exact) return rule.exact === sku.toLowerCase();\n    const name = sku.replace(/_Promo$/i, '');\n    const version = name.match(/_v(\\d+)$/i);\n    const stem = version ? name.slice(0, version.index) : name;\n    const m = stem.match(/^(?:Standard|Basic)_([A-Za-z]+)\\d+(?:-\\d+)?([A-Za-z][A-Za-z0-9]*)?(?:_([A-Za-z][A-Za-z0-9_]*))?$/i);\n    if (!m) return false;\n    const qualifier = (m[3] || '').replace(/_/g, '').toLowerCase();\n    const prefix = m[1].toLowerCase(), features = (m[2] || '').toLowerCase();\n    return Number(version?.[1] || 1) === rule.version\n        && (rule.features\n            ? prefix + features + qualifier === rule.family + rule.features\n            : prefix === rule.family && !qualifier);\n}\n\nfunction parseCatalog(markdown) {\n    const entries = [];\n    let headers = [], heading = '', lastEntries = [];\n    let expectedTable = false, sectionRows = 0;\n    const finishSection = () => {\n        if (expectedTable && !sectionRows) throw new Error(`Retirement table missing or unrecognized: ${heading}`);\n    };\n    for (const line of markdown.split(/\\r?\\n/)) {\n        if (/^#{1,6}\\s/.test(line)) {\n            finishSection();\n            heading = plain(line);\n            headers = [];\n            lastEntries = [];\n            expectedTable = /retired sizes/i.test(heading) && !/\\bADH\\b|dedicated host/i.test(heading);\n            sectionRows = 0;\n        }\n        if (!line.trim().startsWith('|')) {\n            if (line.trim() && lastEntries.length) {\n                for (const entry of lastEntries) entry.notes += `\\n${plain(line)}`;\n            }\n            continue;\n        }\n        const cells = line.trim().replace(/^\\||\\|$/g, '').split('|').map(s => s.trim());\n        if (cells.some(c => plain(c).toLowerCase() === 'planned retirement date')) {\n            headers = cells.map(c => plain(c).toLowerCase());\n            continue;\n        }\n        if (cells.every(c => /^[-:\\s]+$/.test(c))) continue;\n        if (!headers.length) {\n            if (expectedTable) throw new Error(`Unrecognized retirement table header: ${heading}`);\n            continue;\n        }\n        if (cells.length !== headers.length) throw new Error('Retirement table column count changed');\n        if (/\\bADH\\b|dedicated host/i.test(heading)) continue;\n        const get = name => cells[headers.indexOf(name)];\n        const label = get('series name');\n        const guideCell = get('modernization guide');\n        if (!label || !guideCell) throw new Error('Retirement table is missing required columns');\n        if (!/^(announced|retired)$/i.test(plain(get('retirement status') || ''))) {\n            throw new Error(`Unrecognized retirement status for ${label}`);\n        }\n        const link = guideCell.match(/\\]\\(([^)]+)\\)/);\n        if (!link) throw new Error(`Missing modernization link for ${label}`);\n        const guideUrl = new URL(link[1], CATALOG_URL).href;\n        assertLearnUrl(guideUrl);\n        const entry = {\n            label: plain(label), rules: seriesRules(label),\n            retirementDate: dateOnly(get('planned retirement date')), guideUrl, notes: ''\n        };\n        entries.push(entry);\n        lastEntries.push(entry);\n        sectionRows++;\n    }\n    finishSection();\n    if (!entries.length) throw new Error('No retirement rows found; Microsoft Learn format may have changed');\n    return entries;\n}\n\nfunction assertLearnUrl(value) {\n    const url = new URL(value);\n    if (url.protocol !== 'https:' || url.hostname !== 'learn.microsoft.com'\n        || !url.pathname.startsWith('/en-us/azure/virtual-machines/')) {\n        throw new Error('Unexpected Microsoft Learn source URL');\n    }\n}\n\nfunction assertArmUrl(value) {\n    const url = new URL(value);\n    if (url.origin !== ARM_ROOT) throw new Error('Unexpected Azure API continuation URL');\n}\n\nasync function mapLimit(values, fn, limit = 4) {\n    const results = new Array(values.length);\n    let next = 0;\n    await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {\n        while (next < values.length) {\n            const index = next++;\n            results[index] = await fn(values[index]);\n        }\n    }));\n    return results;\n}\n\nfunction createClient(fetcher = fetch, budgetMs = 95000) {\n    const end = Date.now() + budgetMs;\n    return async (url, options = {}) => {\n        for (let attempt = 0; attempt < 3; attempt++) {\n            const remaining = end - Date.now();\n            if (remaining <= 0) throw new Error('Lookup time budget exceeded; reduce subscription scope');\n            const response = await fetcher(url, {\n                ...options, redirect: 'error', signal: AbortSignal.timeout(Math.min(20000, remaining))\n            });\n            if (response.ok || response.status === 404) return response;\n            if (attempt < 2 && (response.status === 429 || response.status >= 500)) {\n                const retry = Number(response.headers.get('retry-after'));\n                await new Promise(resolve => setTimeout(resolve, Math.min(5000, Math.max(1000, retry * 1000 || 1000))));\n                continue;\n            }\n            throw new Error(`Source request failed (${response.status}): ${new URL(url).pathname}`);\n        }\n    };\n}\n\nasync function learnPage(url, request) {\n    assertLearnUrl(url);\n    const target = new URL(url);\n    target.search = '?accept=text/markdown';\n    let response = await request(target.href);\n    if (response.status === 404 && target.pathname.includes('/sizes/retirement/')) {\n        // Some published links still use the pre-lifecycle documentation path.\n        target.pathname = target.pathname.replace('/sizes/retirement/', '/sizes/lifecycle/retirement/');\n        response = await request(target.href);\n    }\n    if (!response.ok) throw new Error(`Microsoft Learn page unavailable (${response.status}): ${target.pathname}`);\n    if (!(response.headers.get('content-type') || '').includes('text/markdown')) {\n        throw new Error(`Microsoft Learn did not return markdown: ${target.pathname}`);\n    }\n    const text = await response.text();\n    if (!/^# /m.test(text)) throw new Error(`Microsoft Learn article body missing: ${target.pathname}`);\n    return { text: text.replace(/^---\\r?\\n[\\s\\S]*?\\r?\\n---\\r?\\n/, ''), url: target.href.replace(/\\?accept=text\\/markdown$/, '') };\n}\n\nasync function armJson(url, token, request, body) {\n    assertArmUrl(url);\n    const response = await request(url, {\n        method: body ? 'POST' : 'GET',\n        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },\n        ...(body ? { body: JSON.stringify(body) } : {})\n    });\n    if (!response.ok) throw new Error(`Azure API resource unavailable (${response.status}): ${new URL(url).pathname}`);\n    return response.json();\n}\n\nasync function collection(url, token, request) {\n    const values = [], seen = new Set();\n    while (url) {\n        if (seen.has(url)) throw new Error('Azure API returned a repeated continuation URL');\n        seen.add(url);\n        const page = await armJson(url, token, request);\n        if (!Array.isArray(page.value)) throw new Error('Azure API collection is missing value');\n        values.push(...page.value);\n        url = page.nextLink;\n    }\n    return values;\n}\n\nasync function inventory(subscriptions, token, request) {\n    // Resource Graph silently ignores inaccessible subscriptions, so check each explicitly.\n    await mapLimit(subscriptions, id => armJson(`${ARM_ROOT}/subscriptions/${id}?api-version=2022-12-01`, token, request));\n    const resources = [], seen = new Set();\n    let skipToken;\n    do {\n        const page = await armJson(`${ARM_ROOT}/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01`, token, request, {\n            subscriptions, query: INVENTORY_QUERY,\n            options: { resultFormat: 'objectArray', $top: 1000, ...(skipToken ? { $skipToken: skipToken } : {}) }\n        });\n        if (!Array.isArray(page.data)) throw new Error('Resource Graph response is missing data');\n        resources.push(...page.data);\n        skipToken = page.$skipToken;\n        if (skipToken && seen.has(skipToken)) throw new Error('Resource Graph returned a repeated continuation token');\n        if (skipToken) seen.add(skipToken);\n        if ((page.resultTruncated === true || page.resultTruncated === 'true') && !skipToken) {\n            throw new Error('Resource Graph truncated inventory without a continuation token');\n        }\n        if (!skipToken && Number(page.totalRecords) > resources.length) {\n            throw new Error('Resource Graph omitted inventory records without a continuation token');\n        }\n    } while (skipToken);\n    return resources;\n}\n\nfunction cutoffDate(today, months) {\n    const cutoff = new Date(today);\n    const day = cutoff.getUTCDate();\n    cutoff.setUTCDate(1);\n    cutoff.setUTCMonth(cutoff.getUTCMonth() + months);\n    const lastDay = new Date(Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth() + 1, 0)).getUTCDate();\n    cutoff.setUTCDate(Math.min(day, lastDay));\n    return cutoff.toISOString().slice(0, 10);\n}\n\nfunction englishDates(text) {\n    return [...text.matchAll(/\\b(January|February|March|April|May|June|July|August|September|October|November|December)\\s+(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(\\d{4})\\b/gi)]\n        .map(m => {\n            const date = new Date(`${m[1]} ${m[2]}, ${m[3]} 00:00:00 GMT`);\n            if (!Number.isFinite(date.getTime())) throw new Error('Invalid regional retirement date in Microsoft Learn');\n            return date.toISOString().slice(0, 10);\n        });\n}\n\nconst normalized = text => text.toLowerCase().replace(/[^a-z0-9]/g, '');\n\nfunction mentionedLocations(sentence, locations) {\n    let remaining = normalized(sentence);\n    const mentioned = new Set();\n    const aliases = locations.flatMap(loc => [loc.name, loc.displayName, loc.regionalDisplayName]\n        .filter(Boolean).map(alias => ({ name: loc.name, alias: normalized(alias) })))\n        .sort((a, b) => b.alias.length - a.alias.length);\n    for (const { name, alias } of aliases) {\n        if (remaining.includes(alias)) {\n            mentioned.add(name.toLowerCase());\n            remaining = remaining.replaceAll(alias, '|');\n        }\n    }\n    return mentioned;\n}\n\nfunction resolveDeadline(entry, detail, location, locations) {\n    const namedSeries = entry.notes.match(/\\b[A-Z]+[a-z]*(?:_[a-z]+)?_?v\\d+\\b/g) || [];\n    const entryNames = entry.rules.map(rule => normalized(rule.exact\n        || `${rule.family}${rule.features}v${rule.version}`));\n    const tableNotes = namedSeries.length && !namedSeries.some(series => entryNames.includes(normalized(series)))\n        ? '' : entry.notes;\n    const notes = `${tableNotes}\\n${detail}`;\n    const paragraphs = notes.split(/\\n\\s*\\n/).filter(paragraph =>\n        /extension|extended retirement|disregard.{0,100}retirement/i.test(paragraph)\n        || ((/\\b(region|cloud|government|21vianet)\\b/i.test(paragraph)\n            || mentionedLocations(paragraph, locations).size > 0)\n            && /retirement.{0,100}(?:except|does not apply|doesn't apply)/i.test(paragraph)));\n    let date = entry.retirementDate;\n    for (const paragraph of paragraphs) {\n        const sentences = paragraph.replace(/[*`]/g, '').split(/(?<=[.!?])\\s+/);\n        let understood = false, ambiguous = false;\n        for (const sentence of sentences) {\n            const dates = englishDates(sentence);\n            const mentioned = mentionedLocations(sentence, locations);\n            if (mentioned.size && /does not apply|doesn't apply|excluded/i.test(sentence)) {\n                understood = true;\n                if (mentioned.has(location.toLowerCase())) return { date, excluded: true, review: '' };\n            } else if (dates.length && mentioned.size) {\n                if (new Set(dates.filter(value => value !== entry.retirementDate)).size > 1) {\n                    ambiguous = true;\n                    continue;\n                }\n                understood = true;\n                if (mentioned.has(location.toLowerCase())) {\n                    date = [...dates, date].sort().at(-1);\n                }\n            }\n        }\n        if (!understood || ambiguous) return { date, review: 'Regional exception could not be resolved automatically; review the source.' };\n    }\n    return { date, review: '' };\n}\n\nfunction selectEntries(entries, sku) {\n    const matches = entries.flatMap(entry => entry.rules.filter(rule => matchesSku(rule, sku))\n        .map(rule => ({ entry, specificity: rule.specificity })));\n    if (!matches.length) return [];\n    const max = Math.max(...matches.map(match => match.specificity));\n    return [...new Set(matches.filter(match => match.specificity === max).map(match => match.entry))];\n}\n\nasync function scan(input, token, request, now = new Date()) {\n    if (!input || !Array.isArray(input.subscriptionIds) || !input.subscriptionIds.length\n        || input.subscriptionIds.some(id => typeof id !== 'string' || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id))\n        || !Number.isInteger(input.retirementHorizonMonths) || input.retirementHorizonMonths < 1 || input.retirementHorizonMonths > 60) {\n        throw new Error('Expected subscriptionIds (GUID array) and retirementHorizonMonths (integer, 1-60)');\n    }\n    const subscriptions = [...new Set(input.subscriptionIds.map(id => id.toLowerCase()))];\n    const today = new Date(now.toISOString().slice(0, 10));\n    const horizon = cutoffDate(today, input.retirementHorizonMonths);\n    const page = await learnPage(CATALOG_URL, request);\n    const entries = parseCatalog(page.text);\n    const resources = await inventory(subscriptions, token, request);\n    const warnings = new Set();\n    const matches = resources.flatMap(resource => {\n        if (typeof resource.Sku !== 'string' || !resource.Sku) {\n            warnings.add(`No scalar SKU is published for ${resource.id}; no retirement decision was made. Flexible VMSS member VMs are assessed separately.`);\n            return [];\n        }\n        return selectEntries(entries, resource.Sku).filter(entry => entry.retirementDate <= horizon)\n            .map(entry => ({ resource, entry }));\n    });\n    const guides = new Map(await mapLimit([...new Set(matches.map(match => match.entry.guideUrl))],\n        async url => [url, await learnPage(url, request)]));\n    const locations = new Map(await mapLimit([...new Set(matches.map(match => match.resource.SubscriptionId))],\n        async id => [id, await collection(`${ARM_ROOT}/subscriptions/${id}/locations?api-version=2022-12-01`, token, request)]));\n    const groups = [...new Set(matches.map(({ resource: r }) => `${r.SubscriptionId}/${r.Region.toLowerCase()}`))];\n    const skus = new Map(await mapLimit(groups, async key => {\n        const [id, region] = key.split('/');\n        const query = encodeURIComponent(`location eq '${region}'`);\n        const values = await collection(`${ARM_ROOT}/subscriptions/${id}/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=${query}`, token, request);\n        return [key, new Map(values.filter(sku => sku.resourceType === 'virtualMachines')\n            .map(sku => [sku.name.toLowerCase(), sku]))];\n    }));\n    const rows = [], seen = new Set();\n    for (const { resource, entry } of matches) {\n        const guide = guides.get(entry.guideUrl);\n        const deadline = resolveDeadline(entry, guide.text, resource.Region, locations.get(resource.SubscriptionId));\n        if (deadline.excluded || (deadline.date > horizon && !deadline.review)) continue;\n        const key = `${resource.id.toLowerCase()}/${deadline.date}/${guide.url}`;\n        if (seen.has(key)) continue;\n        seen.add(key);\n        const sku = skus.get(`${resource.SubscriptionId}/${resource.Region.toLowerCase()}`).get(resource.Sku.toLowerCase());\n        const capability = name => sku?.capabilities?.find(item => item.name === name)?.value;\n        const days = Math.round((Date.parse(deadline.date) - today.getTime()) / DAY);\n        if (!sku) warnings.add('Some source SKUs are absent from the live Compute catalog; specifications are unavailable, not inferred.');\n        if (deadline.review) warnings.add(deadline.review);\n        rows.push({\n            ...resource,\n            Status: deadline.review ? 'Review regional scope' : days <= 0 ? 'Retired' : `Retires in ${days} day${days === 1 ? '' : 's'}`,\n            RetirementDate: deadline.date,\n            PublishedSeries: entry.label,\n            vCPUs: capability('vCPUsAvailable') || capability('vCPUs') || 'Unavailable',\n            MemoryGB: capability('MemoryGB') || 'Unavailable',\n            MigrationGuidance: guide.url,\n            ScopeNote: deadline.review || (deadline.date !== entry.retirementDate ? 'Regional extension from Microsoft Learn' : 'Published retirement date')\n        });\n    }\n    rows.sort((a, b) => a.RetirementDate.localeCompare(b.RetirementDate) || a.id.localeCompare(b.id));\n    return {\n        resources: rows.slice(0, 1000), totalFindings: rows.length, scannedResources: resources.length,\n        scannedSubscriptions: subscriptions.length, catalogEntries: entries.length,\n        retrievedAt: now.toISOString(), source: CATALOG_URL, warnings: [...warnings]\n    };\n}\n\nasync function handler(context, req) {\n    try {\n        if (!process.env.IDENTITY_ENDPOINT || !process.env.IDENTITY_HEADER) {\n            throw new Error('Function managed identity is not configured');\n        }\n        const request = createClient();\n        const identity = new URL(process.env.IDENTITY_ENDPOINT);\n        identity.searchParams.set('api-version', '2019-08-01');\n        identity.searchParams.set('resource', `${ARM_ROOT}/`);\n        const response = await request(identity.href, { headers: { 'X-IDENTITY-HEADER': process.env.IDENTITY_HEADER } });\n        if (!response.ok) throw new Error(`Managed identity token request failed (${response.status})`);\n        const credentials = await response.json();\n        if (!credentials.access_token) throw new Error('Managed identity token response has no access_token');\n        const result = await scan(req.body, credentials.access_token, request);\n        context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: result };\n    } catch (error) {\n        context.log.error(error.message);\n        context.res = { status: 502, headers: { 'Content-Type': 'application/json' }, body: { error: 'RetirementLookupFailed', message: error.message } };\n    }\n}\n\nmodule.exports = handler;\nmodule.exports.internals = {\n    parseCatalog, seriesRules, matchesSku, dateOnly, cutoffDate, resolveDeadline,\n    selectEntries, createClient, learnPage, collection, inventory, scan, CATALOG_URL\n};\n"
+        }
+      }
+    },
     {
       "type": "Microsoft.Web/connections",
       "apiVersion": "2016-06-01",
@@ -97,13 +206,15 @@
         "type": "SystemAssigned"
       },
       "dependsOn": [
-        "[resourceId('Microsoft.Web/connections', parameters('office365ConnectionName'))]"
+        "[resourceId('Microsoft.Web/connections', parameters('office365ConnectionName'))]",
+        "[resourceId('Microsoft.Web/sites/functions', variables('lookupAppName'), 'retirements')]",
+        "[subscriptionResourceId('Microsoft.Resources/deployments', variables('readerDeploymentName'))]"
       ],
       "properties": {
         "state": "[parameters('workflowState')]",
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-          "contentVersion": "1.0.0.0",
+          "contentVersion": "2.0.0.0",
           "parameters": {
             "$connections": {
               "type": "Object",
@@ -150,103 +261,53 @@
             }
           },
           "actions": {
-            "Risk_query": {
-              "type": "Compose",
-              "runAfter": {},
-              "inputs": "// Retirement dates: https://learn.microsoft.com/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\nresources\n| where type =~ 'microsoft.compute/virtualmachines' or type =~ 'microsoft.compute/virtualmachinescalesets'\n| extend Sku = iff(type =~ 'microsoft.compute/virtualmachines', tostring(properties.hardwareProfile.vmSize), tostring(sku.name))\n| extend k = toupper(Sku), loc = tolower(location)\n| extend n = toint(extract('^[A-Z]+_[A-Z]+([0-9]+)', 1, k)), c = extract('^[A-Z]+_[A-Z]+[0-9]+(-[0-9]+)', 1, k)\n| extend f = case(\n    k matches regex '^STANDARD_DS?(1|2|3|4|5|11|12|13|14|15)(-[0-9]+)?(_V2)?(_PROMO)?$', 'D',\n    k matches regex '^STANDARD_D[0-9]+S?_V3$', 'Dv3',\n    k matches regex '^STANDARD_E64IS?_V3$', 'Ev3i',\n    k matches regex '^STANDARD_E[0-9]+(-[0-9]+)?S?_V3$', 'Ev3',\n    k matches regex '^STANDARD_A[0-9]+_V2$', 'Av2',\n    k matches regex '^STANDARD_A[0-9]+M_V2$', 'Amv2',\n    k matches regex '^(BASIC|STANDARD)_A[0-7]$', 'Av1',\n    k matches regex '^STANDARD_B[0-9]+[A-Z]+[0-9]?$', 'Bv1',\n    k matches regex '^STANDARD_F[0-9]+S?(_V2)?$', 'F',\n    k matches regex '^STANDARD_GS?[0-9](-[0-9]+)?$', 'G',\n    k matches regex '^STANDARD_L[0-9]+S$', 'Ls',\n    k matches regex '^STANDARD_L[0-9]+S_V2$', 'Lsv2',\n    k matches regex '^STANDARD_M192ID?M?S_V2$', 'Msv2',\n    k matches regex '^STANDARD_DC[0-9]+S?_V2$', 'DCsv2',\n    k matches regex '^STANDARD_DC[0-9]+A?D?S_CC_V5$', 'DCcc',\n    k matches regex '^STANDARD_EC[0-9]+A?D?S_CC_V5$', 'ECcc',\n    k matches regex '^STANDARD_DC[0-9]+D?S_V3$', 'DCsv3',\n    k matches regex '^STANDARD_NC(6|12|24|24R)(_PROMO)?$', 'NC',\n    k matches regex '^STANDARD_NC(6|12|24)R?S_V2$', 'NCv2',\n    k matches regex '^STANDARD_NC(6|12|24)R?S_V3$', 'NCv3',\n    k matches regex '^STANDARD_ND(6|12|24)R?S$', 'ND',\n    k matches regex '^STANDARD_NV(6|12|24)(_PROMO)?$', 'NV',\n    k matches regex '^STANDARD_NV[0-9]+[HM]?S_V3$', 'NVv3',\n    k matches regex '^STANDARD_NV[0-9]+AH?S_V4$', 'NVv4',\n    k matches regex '^STANDARD_NP(10|20|40)S$', 'NP',\n    k matches regex '^STANDARD_H(8|16)M?R?(_PROMO)?$', 'H',\n    k matches regex '^STANDARD_HC44(-[0-9]+)?RS$', 'HC',\n    k matches regex '^STANDARD_HB120(-[0-9]+)?RS_V2$', 'HBv2',\n    '')\n| where isnotempty(f)\n| extend RetireOn = case(\n    f in ('D', 'Ls'), datetime(2028-05-01),\n    f in ('Av2', 'Amv2', 'Bv1', 'F', 'G', 'Lsv2'), datetime(2028-11-15),\n    f in ('Dv3', 'Ev3', 'Ev3i') and not(loc matches regex '^(usgov|usdod|usnat|ussec|china)'), datetime(2029-11-15),\n    f == 'DCsv3', datetime(2029-10-31),\n    f == 'Msv2', datetime(2027-03-31),\n    f in ('NP', 'HC', 'HBv2'), datetime(2027-05-31),\n    f == 'NVv3' and loc == 'uaenorth', datetime(2027-01-31),\n    f in ('NVv3', 'NVv4'), datetime(2026-09-30),\n    f in ('DCcc', 'ECcc'), datetime(2026-09-01),\n    f == 'DCsv2', datetime(2026-06-30),\n    f == 'NCv3' and loc in ('usgovvirginia', 'usgovarizona'), datetime(2026-12-31),\n    f == 'NCv3' and loc in ('jioindiawest', 'chinanorth3'), datetime(2027-06-30),\n    f == 'NCv3', datetime(2025-09-30),\n    f == 'Av1', datetime(2024-08-31),\n    f in ('NC', 'NCv2', 'ND', 'NV'), datetime(2023-09-06),\n    f == 'H', datetime(2022-08-31),\n    datetime(null))\n| where RetireOn <= datetime_add('month', @{parameters('retirementHorizonMonths')}, startofday(now()))\n| extend v = case(f == 'D' and n < 10, toint(pow(2, n - 1)), f == 'D' and n == 15, 20, f == 'D', toint(pow(2, n - 10)), f == 'G', toint(pow(2, n)), n)\n| extend Recommended = case(\n    f == 'D' and n < 10, strcat('Standard_D', max_of(v, 2), 'ds_v5'),\n    f == 'D', strcat('Standard_E', v, c, 'ds_v5'),\n    f == 'Dv3', strcat('Standard_D', n, 'ds_v5'),\n    f == 'Ev3i', iff(k contains 'IS_', 'Standard_E104ids_v5', 'Standard_E104id_v5'),\n    f == 'Ev3', strcat('Standard_E', n, c, 'ds_v5'),\n    f == 'Av2', strcat('Standard_D', max_of(n, 2), 'd_v5'),\n    f == 'Amv2', strcat('Standard_E', n, 'd_v5'),\n    f == 'Av1', 'Bsv2, Ddv5 or Edv5',\n    f == 'Bv1', case(\n        k in ('STANDARD_B1LS', 'STANDARD_B1LS2', 'STANDARD_B1S'), 'Standard_B2ts_v2',\n        k in ('STANDARD_B1MS', 'STANDARD_B2S'), 'Standard_B2ls_v2',\n        k == 'STANDARD_B2MS', 'Standard_B2s_v2',\n        k == 'STANDARD_B4MS', 'Standard_B4s_v2',\n        k == 'STANDARD_B8MS', 'Standard_B8s_v2',\n        k in ('STANDARD_B12MS', 'STANDARD_B16MS'), 'Standard_B16s_v2',\n        k == 'STANDARD_B20MS', 'Standard_B32s_v2',\n        'Bsv2'),\n    f == 'F', strcat('Standard_D', iff(n > 64, 96, max_of(n, 2)), 'lds_v5'),\n    f == 'G', strcat('Standard_L', max_of(v * 2, 8), 's_v3'),\n    f == 'Ls', strcat('Standard_L', max_of(n, 8), 's_v3'),\n    f == 'Lsv2', strcat('Standard_L', n, 's_v3'),\n    f == 'Msv2', 'Msv3 or Mdsv3 Medium Memory',\n    f == 'DCsv2', 'DCdsv3, DCasv6 or DCesv6',\n    f == 'DCcc', 'Dasv5/Dadsv5 or DCasv6',\n    f == 'ECcc', 'Easv5/Eadsv5 or ECasv6',\n    f == 'DCsv3', 'DCasv6/DCadsv6 or DCesv6/DCedsv6',\n    f == 'NC', case(n == 6, 'Standard_NC4as_T4_v3', n == 12, 'Standard_NC16as_T4_v3', 'Standard_NC64as_T4_v3'),\n    f == 'NCv2', case(n == 6, 'Standard_NC24ads_A100_v4', n == 12, 'Standard_NC48ads_A100_v4', 'Standard_NC96ads_A100_v4'),\n    f == 'NCv3', 'NCadsH100_v5',\n    f == 'ND', case(n == 6, 'Standard_NC4as_T4_v3', n == 12, 'Standard_NC16as_T4_v3', k == 'STANDARD_ND24RS', 'Standard_ND96amsr_A100_v4', 'Standard_NC64as_T4_v3'),\n    f in ('NV', 'NVv3'), 'NVadsA10_v5',\n    f == 'NVv4', 'NVads_V710_v5',\n    f == 'NP', case(n == 10, 'Standard_NC4as_T4_v3', n == 20, 'Standard_NC16as_T4_v3', 'Standard_NC64as_T4_v3'),\n    f in ('H', 'HC', 'HBv2'), 'HBv4, HBv5 or HX',\n    '')\n| extend Days = datetime_diff('day', RetireOn, startofday(now()))\n| join kind=leftouter (resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId, SubscriptionName = name) on subscriptionId\n| project\n    Status = iff(Days <= 0, 'Retired', strcat('Retires in ', Days, iff(Days == 1, ' day', ' days'))),\n    RetirementDate = substring(tostring(RetireOn), 0, 10),\n    SubscriptionId = subscriptionId,\n    SubscriptionName,\n    ResourceGroup = resourceGroup,\n    ResourceName = name,\n    Type = iff(type =~ 'microsoft.compute/virtualmachines', 'VM', strcat('VMSS (', tostring(toint(sku.capacity)), ')')),\n    Sku,\n    RecommendedSku = Recommended,\n    Region = location,\n    Days\n| order by Days asc, SubscriptionName asc, ResourceGroup asc, ResourceName asc\n| project-away Days"
-            },
-            "Find_risky_VMs": {
+            "Lookup_retirements": {
               "type": "Http",
-              "runAfter": {
-                "Risk_query": [
-                  "Succeeded"
-                ]
+              "runAfter": {},
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": [
+                    "inputs",
+                    "outputs"
+                  ]
+                }
               },
               "inputs": {
                 "method": "POST",
-                "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
-                "body": {
-                  "subscriptions": "@parameters('subscriptionIds')",
-                  "query": "@outputs('Risk_query')",
-                  "options": {
-                    "resultFormat": "objectArray",
-                    "$top": 1000
-                  }
+                "uri": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('lookupAppName')), '2022-03-01').defaultHostName, '/api/retirements')]",
+                "headers": {
+                  "Content-Type": "application/json",
+                  "x-functions-key": "[listKeys(concat(resourceId('Microsoft.Web/sites', variables('lookupAppName')), '/host/default'), '2022-03-01').functionKeys.default]"
                 },
-                "authentication": {
-                  "type": "ManagedServiceIdentity",
-                  "audience": "https://management.azure.com/"
+                "body": {
+                  "subscriptionIds": "@parameters('subscriptionIds')",
+                  "retirementHorizonMonths": "@parameters('retirementHorizonMonths')"
+                },
+                "retryPolicy": {
+                  "type": "exponential",
+                  "count": 2,
+                  "interval": "PT20S"
                 }
               }
             },
-            "Check_subscription_access": {
-              "type": "Http",
-              "runAfter": {},
-              "inputs": {
-                "method": "POST",
-                "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
-                "body": {
-                  "subscriptions": "@parameters('subscriptionIds')",
-                  "query": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId",
-                  "options": {
-                    "resultFormat": "objectArray",
-                    "$top": 1000
-                  }
-                },
-                "authentication": {
-                  "type": "ManagedServiceIdentity",
-                  "audience": "https://management.azure.com/"
-                }
-              }
-            },
-            "Readable_subscriptions": {
-              "type": "Select",
-              "runAfter": {
-                "Check_subscription_access": [
-                  "Succeeded"
-                ]
-              },
-              "inputs": {
-                "from": "@coalesce(body('Check_subscription_access')?['data'], json('[]'))",
-                "select": "@toLower(item()?['subscriptionId'])"
-              }
-            },
-            "Unreadable_subscriptions": {
-              "type": "Query",
-              "runAfter": {
-                "Readable_subscriptions": [
-                  "Succeeded"
-                ]
-              },
-              "inputs": {
-                "from": "@parameters('subscriptionIds')",
-                "where": "@not(contains(body('Readable_subscriptions'), toLower(item())))"
-              }
-            },
-            "Risky_resources": {
-              "type": "Compose",
-              "runAfter": {
-                "Find_risky_VMs": [
-                  "Succeeded"
-                ]
-              },
-              "inputs": "@coalesce(body('Find_risky_VMs')?['data'], json('[]'))"
-            },
-            "If_risky_resources_found": {
+            "If_findings_or_warnings": {
               "type": "If",
               "runAfter": {
-                "Risky_resources": [
-                  "Succeeded"
-                ],
-                "Unreadable_subscriptions": [
+                "Lookup_retirements": [
                   "Succeeded"
                 ]
               },
               "expression": {
-                "and": [
+                "or": [
                   {
                     "greater": [
-                      "@length(outputs('Risky_resources'))",
+                      "@body('Lookup_retirements')['totalFindings']",
+                      0
+                    ]
+                  },
+                  {
+                    "greater": [
+                      "@length(body('Lookup_retirements')['warnings'])",
                       0
                     ]
                   }
@@ -257,48 +318,64 @@
                   "type": "Table",
                   "runAfter": {},
                   "inputs": {
-                    "from": "@outputs('Risky_resources')",
+                    "from": "@body('Lookup_retirements')['resources']",
                     "format": "HTML",
                     "columns": [
                       {
                         "header": "Status",
-                        "value": "@item()?['Status']"
+                        "value": "@item()['Status']"
                       },
                       {
                         "header": "Retirement date",
-                        "value": "@item()?['RetirementDate']"
+                        "value": "@item()['RetirementDate']"
                       },
                       {
                         "header": "Subscription ID",
-                        "value": "@item()?['SubscriptionId']"
+                        "value": "@item()['SubscriptionId']"
                       },
                       {
                         "header": "Subscription name",
-                        "value": "@item()?['SubscriptionName']"
+                        "value": "@item()['SubscriptionName']"
                       },
                       {
                         "header": "Resource group",
-                        "value": "@item()?['ResourceGroup']"
+                        "value": "@item()['ResourceGroup']"
                       },
                       {
                         "header": "Resource name",
-                        "value": "@item()?['ResourceName']"
+                        "value": "@item()['ResourceName']"
                       },
                       {
                         "header": "Type",
-                        "value": "@item()?['Type']"
+                        "value": "@item()['Type']"
                       },
                       {
                         "header": "SKU",
-                        "value": "@item()?['Sku']"
+                        "value": "@item()['Sku']"
                       },
                       {
-                        "header": "Recommended SKU",
-                        "value": "@item()?['RecommendedSku']"
+                        "header": "vCPUs",
+                        "value": "@item()['vCPUs']"
+                      },
+                      {
+                        "header": "Memory (GiB)",
+                        "value": "@item()['MemoryGB']"
                       },
                       {
                         "header": "Region",
-                        "value": "@item()?['Region']"
+                        "value": "@item()['Region']"
+                      },
+                      {
+                        "header": "Published series",
+                        "value": "@item()['PublishedSeries']"
+                      },
+                      {
+                        "header": "Migration guidance",
+                        "value": "@item()['MigrationGuidance']"
+                      },
+                      {
+                        "header": "Scope note",
+                        "value": "@item()['ScopeNote']"
                       }
                     ]
                   }
@@ -310,12 +387,29 @@
                       "Succeeded"
                     ]
                   },
-                  "inputs": "@replace(replace(replace(replace(body('Risk_table'), '<table>', '<table style=\"border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:12px\">'), '<th>', '<th style=\"border:1px solid #c8c6c4;padding:4px 8px;background:#f3f2f1;text-align:left\">'), '<td>Retired</td>', '<td style=\"border:1px solid #c8c6c4;padding:4px 8px;color:#a4262c;font-weight:600\">Retired</td>'), '<td>', '<td style=\"border:1px solid #c8c6c4;padding:4px 8px\">')"
+                  "inputs": "@replace(replace(replace(body('Risk_table'), '<table>', '<table style=\"border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;font-size:12px\">'), '<th>', '<th style=\"border:1px solid #c8c6c4;padding:4px 8px;background:#f3f2f1;text-align:left\">'), '<td>', '<td style=\"border:1px solid #c8c6c4;padding:4px 8px\">')"
+                },
+                "Warning_table": {
+                  "type": "Table",
+                  "runAfter": {},
+                  "inputs": {
+                    "from": "@body('Lookup_retirements')['warnings']",
+                    "format": "HTML",
+                    "columns": [
+                      {
+                        "header": "Lookup warnings",
+                        "value": "@item()"
+                      }
+                    ]
+                  }
                 },
                 "Send_email": {
                   "type": "ApiConnection",
                   "runAfter": {
                     "Email_table": [
+                      "Succeeded"
+                    ],
+                    "Warning_table": [
                       "Succeeded"
                     ]
                   },
@@ -329,43 +423,9 @@
                     "path": "/v2/Mail",
                     "body": {
                       "To": "@{join(parameters('recipients'), ';')}",
-                      "Subject": "Azure VM retirement: @{length(outputs('Risky_resources'))} VMs or scale sets need action",
-                      "Body": "<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px\">@{length(outputs('Risky_resources'))} VMs or scale sets use sizes that are retired or retire within @{parameters('retirementHorizonMonths')} months. Resize or migrate them before the retirement date.</p>@{outputs('Email_table')}<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#605e5c\">Scanned @{sub(length(parameters('subscriptionIds')), length(body('Unreadable_subscriptions')))} of @{length(parameters('subscriptionIds'))} subscriptions@{if(greater(int(coalesce(body('Find_risky_VMs')?['totalRecords'], 0)), length(outputs('Risky_resources'))), concat('; showing the first ', string(length(outputs('Risky_resources'))), ' of ', string(body('Find_risky_VMs')?['totalRecords'])), '')}. Recommended sizes keep the vCPU and memory class; validate disks, images and quota before resizing. <a href=\"https://learn.microsoft.com/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Retirement dates and guidance</a></p>",
+                      "Subject": "Azure VM retirement: @{body('Lookup_retirements')['totalFindings']} findings",
+                      "Body": "<p>@{body('Lookup_retirements')['totalFindings']} retirement findings within @{parameters('retirementHorizonMonths')} months, including already-retired sizes and regional-scope items requiring review.</p>@{outputs('Email_table')}@{body('Warning_table')}<p>Scanned @{body('Lookup_retirements')['scannedResources']} VMs/VMSS in @{body('Lookup_retirements')['scannedSubscriptions']} subscriptions. Showing @{length(body('Lookup_retirements')['resources'])} of @{body('Lookup_retirements')['totalFindings']} findings. Source retrieved: @{body('Lookup_retirements')['retrievedAt']}.</p><p>Dates and migration links come from live Microsoft Learn pages; specifications come from the Compute SKU API. Review scope notes and the linked guidance before choosing a replacement. No compatibility, quota or capacity guarantee is implied. Coverage is limited to the currently published retirement tables; absence from this report is not proof that a size is supported. <a href=\"https://learn.microsoft.com/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Microsoft retirement source</a></p>",
                       "Importance": "High"
-                    }
-                  }
-                }
-              },
-              "else": {
-                "actions": {}
-              }
-            },
-            "If_access_missing": {
-              "type": "If",
-              "runAfter": {
-                "If_risky_resources_found": [
-                  "Succeeded"
-                ]
-              },
-              "expression": {
-                "and": [
-                  {
-                    "greater": [
-                      "@length(body('Unreadable_subscriptions'))",
-                      0
-                    ]
-                  }
-                ]
-              },
-              "actions": {
-                "Fail_run": {
-                  "type": "Terminate",
-                  "runAfter": {},
-                  "inputs": {
-                    "runStatus": "Failed",
-                    "runError": {
-                      "code": "MissingReaderAccess",
-                      "message": "The Logic App identity has no Reader access to: @{join(body('Unreadable_subscriptions'), ', ')}"
                     }
                   }
                 }
@@ -394,11 +454,11 @@
       "condition": "[parameters('assignReaderRole')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2022-09-01",
-      "name": "[format('{0}-reader-{1}', take(parameters('workflowName'), 40), uniqueString(resourceGroup().id))]",
+      "name": "[variables('readerDeploymentName')]",
       "subscriptionId": "[subscription().subscriptionId]",
       "location": "[variables('normalizedLocation')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+        "[resourceId('Microsoft.Web/sites', variables('lookupAppName'))]"
       ],
       "properties": {
         "mode": "Incremental",
@@ -407,7 +467,7 @@
         },
         "parameters": {
           "principalId": {
-            "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+            "value": "[reference(resourceId('Microsoft.Web/sites', variables('lookupAppName')), '2022-03-01', 'full').identity.principalId]"
           }
         },
         "template": {
@@ -444,7 +504,18 @@
     },
     "workflowPrincipalId": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+      "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]",
+      "metadata": {
+        "description": "Legacy scheduler identity. Grant inventory Reader access to lookupPrincipalId instead."
+      }
+    },
+    "lookupPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('lookupAppName')), '2022-03-01', 'full').identity.principalId]"
+    },
+    "lookupResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/sites', variables('lookupAppName'))]"
     },
     "office365ConnectionResourceId": {
       "type": "string",
@@ -452,7 +523,7 @@
     },
     "postDeploymentSteps": {
       "type": "string",
-      "value": "1) Open the Office 365 connection > Edit API connection > Authorize > Save. 2) Grant the Logic App identity Reader on every other subscription in subscriptionIds. 3) Enable the Logic App. It runs every other Monday at 09:00 (Turkey Standard Time)."
+      "value": "1) Authorize the Office 365 connection. 2) Grant the lookupPrincipalId identity Reader on every subscription in subscriptionIds (deployment subscription is automatic when assignReaderRole=true). 3) Enable the Logic App. Runs every other Monday at 09:00 Turkey Standard Time."
     }
   }
 }
