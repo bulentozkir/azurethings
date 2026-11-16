@@ -1,20 +1,12 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-  "contentVersion": "1.1.0.0",
+  "contentVersion": "1.2.0.0",
   "parameters": {
     "recipients": {
       "type": "array",
       "minLength": 1,
       "metadata": {
         "description": "Email addresses that receive the report, as a JSON array. Example: [\"ops@contoso.com\",\"team@contoso.com\"]"
-      }
-    },
-    "subscriptionIds": {
-      "type": "array",
-      "defaultValue": "[createArray(subscription().subscriptionId)]",
-      "minLength": 1,
-      "metadata": {
-        "description": "Subscription IDs to check, as a JSON array. Defaults to the deployment subscription. Grant the Logic App identity Reader on each one."
       }
     },
     "retirementHorizonMonths": {
@@ -66,7 +58,7 @@
       "type": "bool",
       "defaultValue": true,
       "metadata": {
-        "description": "Grant the Logic App identity Reader on the deployment subscription. Requires Owner or User Access Administrator."
+        "description": "Grant the Logic App identity Reader on the deployment subscription. The workflow scans every subscription its identity can read, so grant Reader on a management group to cover more. Requires Owner or User Access Administrator."
       }
     }
   },
@@ -103,7 +95,7 @@
         "state": "[parameters('workflowState')]",
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-          "contentVersion": "1.1.0.0",
+          "contentVersion": "1.2.0.0",
           "parameters": {
             "$connections": {
               "type": "Object",
@@ -112,10 +104,6 @@
             "recipients": {
               "type": "Array",
               "defaultValue": "[parameters('recipients')]"
-            },
-            "subscriptionIds": {
-              "type": "Array",
-              "defaultValue": "[parameters('subscriptionIds')]"
             },
             "retirementHorizonMonths": {
               "type": "Int",
@@ -169,6 +157,77 @@
               "inputs": {
                 "method": "GET",
                 "uri": "https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions?accept=text/markdown"
+              }
+            },
+            "List_subscriptions": {
+              "type": "Http",
+              "runAfter": {},
+              "inputs": {
+                "method": "POST",
+                "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
+                "body": {
+                  "query": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId",
+                  "options": {
+                    "resultFormat": "objectArray",
+                    "$top": 1000
+                  }
+                },
+                "authentication": {
+                  "type": "ManagedServiceIdentity",
+                  "audience": "https://management.azure.com/"
+                }
+              }
+            },
+            "Subscription_ids": {
+              "type": "Select",
+              "runAfter": {
+                "List_subscriptions": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "from": "@coalesce(body('List_subscriptions')?['data'], json('[]'))",
+                "select": "@toLower(item()?['subscriptionId'])"
+              }
+            },
+            "If_subscription_scope_invalid": {
+              "type": "If",
+              "runAfter": {
+                "Subscription_ids": [
+                  "Succeeded"
+                ]
+              },
+              "expression": {
+                "or": [
+                  {
+                    "equals": [
+                      "@length(body('Subscription_ids'))",
+                      0
+                    ]
+                  },
+                  {
+                    "greater": [
+                      "@int(coalesce(body('List_subscriptions')?['totalRecords'], 0))",
+                      1000
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Fail_subscription_scope": {
+                  "type": "Terminate",
+                  "runAfter": {},
+                  "inputs": {
+                    "runStatus": "Failed",
+                    "runError": {
+                      "code": "@{if(equals(length(body('Subscription_ids')), 0), 'NoReadableSubscriptions', 'TooManySubscriptions')}",
+                      "message": "@{if(equals(length(body('Subscription_ids')), 0), 'The Logic App identity cannot read any subscription. Grant it Reader on a management group or on each subscription to scan.', 'The Logic App identity can read more than 1000 subscriptions, which is more than one Resource Graph call can cover. Reduce its Reader assignments.')}"
+                    }
+                  }
+                }
+              },
+              "else": {
+                "actions": {}
               }
             },
             "Catalog_vm_section": {
@@ -256,13 +315,16 @@
               "runAfter": {
                 "Risk_query": [
                   "Succeeded"
+                ],
+                "If_subscription_scope_invalid": [
+                  "Succeeded"
                 ]
               },
               "inputs": {
                 "method": "POST",
                 "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
                 "body": {
-                  "subscriptions": "@parameters('subscriptionIds')",
+                  "subscriptions": "@body('Subscription_ids')",
                   "query": "@outputs('Risk_query')",
                   "options": {
                     "resultFormat": "objectArray",
@@ -273,50 +335,6 @@
                   "type": "ManagedServiceIdentity",
                   "audience": "https://management.azure.com/"
                 }
-              }
-            },
-            "Check_subscription_access": {
-              "type": "Http",
-              "runAfter": {},
-              "inputs": {
-                "method": "POST",
-                "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
-                "body": {
-                  "subscriptions": "@parameters('subscriptionIds')",
-                  "query": "resourcecontainers | where type =~ 'microsoft.resources/subscriptions' | project subscriptionId",
-                  "options": {
-                    "resultFormat": "objectArray",
-                    "$top": 1000
-                  }
-                },
-                "authentication": {
-                  "type": "ManagedServiceIdentity",
-                  "audience": "https://management.azure.com/"
-                }
-              }
-            },
-            "Readable_subscriptions": {
-              "type": "Select",
-              "runAfter": {
-                "Check_subscription_access": [
-                  "Succeeded"
-                ]
-              },
-              "inputs": {
-                "from": "@coalesce(body('Check_subscription_access')?['data'], json('[]'))",
-                "select": "@toLower(item()?['subscriptionId'])"
-              }
-            },
-            "Unreadable_subscriptions": {
-              "type": "Query",
-              "runAfter": {
-                "Readable_subscriptions": [
-                  "Succeeded"
-                ]
-              },
-              "inputs": {
-                "from": "@parameters('subscriptionIds')",
-                "where": "@not(contains(body('Readable_subscriptions'), toLower(item())))"
               }
             },
             "Risky_rows": {
@@ -335,9 +353,6 @@
                   "Succeeded"
                 ],
                 "Risky_rows": [
-                  "Succeeded"
-                ],
-                "Unreadable_subscriptions": [
                   "Succeeded"
                 ]
               },
@@ -626,42 +641,8 @@
                     "body": {
                       "To": "@{join(parameters('recipients'), ';')}",
                       "Subject": "Azure VM retirement: @{length(outputs('Risky_resources'))} VMs or scale sets need action",
-                      "Body": "<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px\">@{length(outputs('Risky_resources'))} VMs or scale sets use sizes that are retired or retire within @{parameters('retirementHorizonMonths')} months. Resize or migrate them before the retirement date.</p>@{outputs('Email_table')}<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#605e5c\">Scanned @{sub(length(parameters('subscriptionIds')), length(body('Unreadable_subscriptions')))} of @{length(parameters('subscriptionIds'))} subscriptions@{if(greater(int(coalesce(body('Find_risky_VMs')?['totalRecords'], 0)), length(outputs('Risky_rows'))), concat('; the query result was truncated to the first ', string(length(outputs('Risky_rows'))), ' of ', string(body('Find_risky_VMs')?['totalRecords']), ' matches'), '')}. Retirement dates and guides are fetched live from Microsoft Learn; vCPU and memory specs come from the Azure Compute SKUs API. Check the linked guide for regional extensions and validate disks, images, and quota before resizing. <a href=\"https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Retirement dates and guidance</a></p>",
+                      "Body": "<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px\">@{length(outputs('Risky_resources'))} VMs or scale sets use sizes that are retired or retire within @{parameters('retirementHorizonMonths')} months. Resize or migrate them before the retirement date.</p>@{outputs('Email_table')}<p style=\"font-family:Segoe UI,Arial,sans-serif;font-size:12px;color:#605e5c\">Scanned @{length(body('Subscription_ids'))} subscription@{if(equals(length(body('Subscription_ids')), 1), '', 's')} that the Logic App identity can read@{if(greater(int(coalesce(body('Find_risky_VMs')?['totalRecords'], 0)), length(outputs('Risky_rows'))), concat('; the query result was truncated to the first ', string(length(outputs('Risky_rows'))), ' of ', string(body('Find_risky_VMs')?['totalRecords']), ' matches'), '')}. Retirement dates and guides are fetched live from Microsoft Learn; vCPU and memory specs come from the Azure Compute SKUs API. Check the linked guide for regional extensions and validate disks, images, and quota before resizing. <a href=\"https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions\">Retirement dates and guidance</a></p>",
                       "Importance": "High"
-                    }
-                  }
-                }
-              },
-              "else": {
-                "actions": {}
-              }
-            },
-            "If_access_missing": {
-              "type": "If",
-              "runAfter": {
-                "If_risky_resources_found": [
-                  "Succeeded"
-                ]
-              },
-              "expression": {
-                "and": [
-                  {
-                    "greater": [
-                      "@length(body('Unreadable_subscriptions'))",
-                      0
-                    ]
-                  }
-                ]
-              },
-              "actions": {
-                "Fail_run": {
-                  "type": "Terminate",
-                  "runAfter": {},
-                  "inputs": {
-                    "runStatus": "Failed",
-                    "runError": {
-                      "code": "MissingReaderAccess",
-                      "message": "The Logic App identity has no Reader access to: @{join(body('Unreadable_subscriptions'), ', ')}"
                     }
                   }
                 }
@@ -748,7 +729,7 @@
     },
     "postDeploymentSteps": {
       "type": "string",
-      "value": "1) Open the Office 365 connection > Edit API connection > Authorize > Save. 2) Grant the Logic App identity Reader on every other subscription in subscriptionIds. 3) Enable the Logic App. It runs every other Monday at 09:00 (Turkey Standard Time)."
+      "value": "1) Open the Office 365 connection > Edit API connection > Authorize > Save. 2) Grant the Logic App identity Reader on the subscriptions to scan, ideally once on a management group: the workflow scans every subscription its identity can read. 3) Enable the Logic App. It runs every other Monday at 09:00 (Turkey Standard Time)."
     }
   }
 }

@@ -19,13 +19,14 @@ No Storage account, Function App, or App Service plan is created.
 ## How it works
 
 - Runs every other Monday at 09:00 (Turkey Standard Time), starting 12 October 2026. You can change this in the **Recurrence** trigger.
+- Starts by discovering its own scope (`List_subscriptions`): one Resource Graph call, with no subscription list, returns every subscription the Logic App identity can read. There is no subscription parameter to maintain. New subscriptions are picked up automatically once the identity can read them.
 - Fetches Microsoft's live [VM size retirements markdown page](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirements-and-capacity-restrictions?accept=text/markdown) on every run (`Fetch_retirement_catalog`) and parses the published retiring series names, retirement dates, and modernization guide links natively in Logic Apps. If the page table structure changes and cannot be parsed, the run fails with `RetirementCatalogFormatChanged` rather than silently skipping alerts.
-- Queries Azure Resource Graph (`Find_risky_VMs`) across `subscriptionIds`. The query receives the parsed catalog as data and matches each deployed VM and scale set size to a published series by comparing normalized size components (family, feature letters, qualifier and generation), for example `Standard_D4s_v3` to `Dsv3-series`. Exact sizes listed on the page, such as `Standard_M192idms_v2`, match by name. No SKU names, series or dates are hardcoded in the workflow. Dedicated Host entries are excluded.
+- Queries Azure Resource Graph (`Find_risky_VMs`) across exactly those subscriptions. The query receives the parsed catalog as data and matches each deployed VM and scale set size to a published series by comparing normalized size components (family, feature letters, qualifier and generation), for example `Standard_D4s_v3` to `Dsv3-series`. Exact sizes listed on the page, such as `Standard_M192idms_v2`, match by name. No SKU names, series or dates are hardcoded in the workflow. Dedicated Host entries are excluded.
 - A size can match both a general and a specific row, for example `Dv3` and `Dsv3`. The most specific row wins and each resource appears once.
 - When at least one VM or scale set is at risk, calls the [Azure Compute Resource SKUs REST API](https://learn.microsoft.com/en-us/rest/api/compute/resource-skus/list) (`Get_compute_skus`) per affected subscription and region to look up live `vCPUs` and `Memory (GiB)` specifications. This step is best effort: if a lookup fails, or a retired size is no longer listed, those cells show `n/a` and the email is still sent.
 - Sends one email when at least one VM or scale set is retired or retires within `retirementHorizonMonths`. No email is sent when nothing is at risk.
 - Email columns: status, retirement date, subscription ID, subscription name, resource group, resource name, type, SKU, vCPUs, memory (GiB), published series, clickable migration guide link, and region.
-- Resource Graph silently skips subscriptions it can't read. If the Logic App identity can't read a listed subscription, the run fails with `MissingReaderAccess`.
+- If the identity can read no subscription, the run fails with `NoReadableSubscriptions` instead of reporting an all-clear. If it can read more than 1,000, the run fails with `TooManySubscriptions` instead of scanning a partial list.
 - The email lists up to 1,000 resources.
 - Read-only: it never changes your VMs.
 
@@ -33,34 +34,35 @@ No Storage account, Function App, or App Service plan is created.
 
 1. Select **Deploy to Azure** above.
 2. Choose the subscription and resource group.
-3. Enter **Recipients** and **Subscription Ids** as JSON arrays, for example `["ops@contoso.com"]`.
+3. Enter **Recipients** as a JSON array, for example `["ops@contoso.com"]`.
 4. Select **Review + create**.
+
+Earlier versions had a **Subscription Ids** parameter. It was removed; delete it from any parameters file you reuse.
 
 ### Deployment parameters
 
 | Parameter | Default | Description |
 |---|---|---|
 | Recipients | None (required) | Email addresses, as a JSON array |
-| Subscription Ids | Deployment subscription | Subscriptions to check, as a JSON array |
 | Retirement Horizon Months | `6` | Include sizes that retire within this many months (1-60) |
 | Workflow Name | `vm-retirement-notifier` | Logic App name |
 | Office365 Connection Name | `office365-vm-retirement-notifier` | Outlook connection name |
 | Location | Resource group region | Region for the Logic App and the connection |
 | Workflow State | `Disabled` | Keep disabled until the connection is authorized |
-| Assign Reader Role | `true` | Grants the Logic App identity Reader on the deployment subscription. Requires Owner or User Access Administrator. |
+| Assign Reader Role | `true` | Grants the Logic App identity Reader on the deployment subscription. The workflow scans every subscription its identity can read, so see **After deployment** to cover more. Requires Owner or User Access Administrator. |
 
 ## After deployment
 
 1. **Authorize email.** Open the Office 365 connection > **Edit API connection** > **Authorize** > **Save**. Email is sent from the account you sign in with.
-2. **Grant access to other subscriptions.** Give the Logic App identity **Reader** on every other subscription in `subscriptionIds`. The principal ID is in the deployment output `workflowPrincipalId`.
+2. **Choose what gets scanned.** The workflow scans every subscription its identity can read. The optional role assignment covers only the deployment subscription. To cover more, give the Logic App identity **Reader** once on a management group (it then includes every subscription under it, including future ones), or on individual subscriptions. The principal ID is in the deployment output `workflowPrincipalId`.
 
    ```bash
-   az role assignment create --assignee-object-id <workflowPrincipalId> --assignee-principal-type ServicePrincipal --role Reader --scope /subscriptions/<subscriptionId>
+   az role assignment create --assignee-object-id <workflowPrincipalId> --assignee-principal-type ServicePrincipal --role Reader --scope /providers/Microsoft.Management/managementGroups/<managementGroupId>
    ```
 
 3. **Enable the Logic App.** To test right away, select **Run trigger**.
 
-To change recipients, subscriptions or the horizon later, open the Logic App designer > **Parameters**.
+To change the recipients or the horizon later, open the Logic App designer > **Parameters**.
 
 ## Notes and limitations
 
@@ -68,5 +70,6 @@ To change recipients, subscriptions or the horizon later, open the Logic App des
 - The page is documentation, not a versioned API. If its table structure changes, the run fails with `RetirementCatalogFormatChanged` instead of reporting an all-clear.
 - Regional extensions (for example a later date for a series in one region) are not applied automatically. The reported date is the general date; check the linked migration guide for regional exceptions, OS/NVMe/Gen2 requirements, and quota availability before resizing.
 - Matching relies on Azure's size naming (`Standard_<family><vCPUs><features>[_<qualifier>]_v<generation>`). A newly published series label that doesn't follow that pattern may not match until the rule is reviewed.
+- Only subscriptions the Logic App identity can read are scanned. A subscription it cannot see is not reported, because there is no list to compare against. The email footer shows how many subscriptions were scanned; check that count after changing role assignments.
 - Scale sets that don't publish a size on the scale set itself (some Flexible scale sets) aren't evaluated; their individual VMs are.
 - The report does not suggest a replacement size. Use the migration guide link, and the vCPU and memory columns, to choose one.
