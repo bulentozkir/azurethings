@@ -156,9 +156,9 @@
               "inputs": {
                 "variables": [
                   {
-                    "name": "skuSpecs",
-                    "type": "object",
-                    "value": {}
+                    "name": "skuSpecFragments",
+                    "type": "Array",
+                    "value": []
                   }
                 ]
               }
@@ -444,24 +444,45 @@
                         "select": "@concat('\"', toLower(item()?['name']), '\":{\"vCPUs\":\"', if(not(empty(xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"vCPUsAvailable\"]/value)'))), xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"vCPUsAvailable\"]/value)'), if(not(empty(xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"vCPUs\"]/value)'))), xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"vCPUs\"]/value)'), 'n/a')), '\",\"memoryGB\":\"', if(not(empty(xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"MemoryGB\"]/value)'))), xpath(xml(addProperty(json('{}'), 'root', addProperty(json('{}'), 'cap', coalesce(item()?['capabilities'], json('[]'))))), 'string(/root/cap[name=\"MemoryGB\"]/value)'), 'n/a'), '\"}')"
                       }
                     },
-                    "Merge_regional_skus": {
-                      "type": "SetVariable",
+                    "Append_regional_skus": {
+                      "type": "AppendToArrayVariable",
                       "runAfter": {
                         "Regional_sku_pairs": [
                           "Succeeded"
                         ]
                       },
                       "inputs": {
-                        "name": "skuSpecs",
-                        "value": "@mergeObjects(variables('skuSpecs'), json(concat('{', join(body('Regional_sku_pairs'), ','), '}')))"
+                        "name": "skuSpecFragments",
+                        "value": "@join(body('Regional_sku_pairs'), ',')"
                       }
                     }
                   }
                 },
+                "Non_empty_sku_fragments": {
+                  "type": "Query",
+                  "runAfter": {
+                    "Fetch_regional_skus": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "from": "@variables('skuSpecFragments')",
+                    "where": "@not(empty(item()))"
+                  }
+                },
+                "Sku_specs_map": {
+                  "type": "Compose",
+                  "runAfter": {
+                    "Non_empty_sku_fragments": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": "@json(concat('{', join(body('Non_empty_sku_fragments'), ','), '}'))"
+                },
                 "Risk_table": {
                   "type": "Table",
                   "runAfter": {
-                    "Fetch_regional_skus": [
+                    "Sku_specs_map": [
                       "Succeeded"
                     ]
                   },
@@ -503,11 +524,11 @@
                       },
                       {
                         "header": "vCPUs",
-                        "value": "@coalesce(variables('skuSpecs')?[toLower(item()?['Sku'])]?['vCPUs'], 'n/a')"
+                        "value": "@coalesce(outputs('Sku_specs_map')?[toLower(item()?['Sku'])]?['vCPUs'], 'n/a')"
                       },
                       {
                         "header": "Memory (GiB)",
-                        "value": "@coalesce(variables('skuSpecs')?[toLower(item()?['Sku'])]?['memoryGB'], 'n/a')"
+                        "value": "@coalesce(outputs('Sku_specs_map')?[toLower(item()?['Sku'])]?['memoryGB'], 'n/a')"
                       },
                       {
                         "header": "Published series",
